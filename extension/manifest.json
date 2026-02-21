@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Airbnb Wishlist Compare",
+  "version": "1.0.0",
+  "description": "Quickly compare Airbnb wishlist listings side by side",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://www.airbnb.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.airbnb.com/wishlists/*"],
+      "js": [
+        "content/scraper.js",
+        "ui/compare-button.js",
+        "ui/check-icon.js",
+        "ui/comparison-panel.js",
+        "content/content.js"
+      ],
+      "css": ["content/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/*"],
+      "matches": ["https://www.airbnb.com/*"]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__figma__get_screenshot",
+      "mcp__figma__get_metadata",
+      "mcp__figma__get_design_context",
+      "Bash(python3:*)",
+      "Bash(curl:*)"
+    ]
+  }
+}
