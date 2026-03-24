@@ -80,6 +80,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true; // keep channel open for async response
     }
 
+    case 'GET_PRIORITIES': {
+      const storageKey = 'priorities_' + (message.wishlistKey || '').replace(/\//g, '_');
+      chrome.storage.sync.get(storageKey, (result) => {
+        sendResponse({ data: result[storageKey] || null });
+      });
+      return true;
+    }
+
+    case 'SAVE_PRIORITIES': {
+      const storageKey = 'priorities_' + (message.wishlistKey || '').replace(/\//g, '_');
+      chrome.storage.sync.set({ [storageKey]: message.data }, () => {
+        sendResponse({ ok: true });
+      });
+      return true;
+    }
+
     default:
       sendResponse({ error: 'Unknown message type' });
   }
