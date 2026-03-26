@@ -16,6 +16,8 @@
         "ui/compare-button.js",
         "ui/check-icon.js",
         "ui/comparison-panel.js",
+        "ui/priorities-panel.js",
+        "ui/filter-panel.js",
         "content/content.js"
       ],
       "css": ["content/content.css"],

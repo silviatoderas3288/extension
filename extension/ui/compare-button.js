@@ -33,7 +33,7 @@ window.CompareButton = {
 
     const btn = document.createElement('button');
     btn.id = 'airbnb-compare-btn';
-    btn.textContent = 'Compare';
+    btn.textContent = 'Quick Compare';
     btn.className = 'airbnb-compare-btn';
     btn.setAttribute('aria-pressed', 'false');
 

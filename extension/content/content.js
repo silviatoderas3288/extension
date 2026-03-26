@@ -52,6 +52,17 @@
     CheckIcon.injectAll(state.allListings, (listing, isSelected) => {
       onCheckToggle(listing, isSelected);
     });
+
+    // Inject Priorities panel
+    const wishlistKey = window.location.pathname.match(/\/wishlists\/[^/?]+/)?.[0] || '';
+    PrioritiesPanel.inject(wishlistKey, state.allListings);
+
+    // Inject Deep Dive filter panel
+    const fetchAllAmenities = () => state.allListings.forEach(l => fetchAmenities(l));
+    FilterPanel.inject(state.allListings, () => syncCheckStates(), fetchAllAmenities);
+
+    // Pre-fetch amenities for all listings immediately so price/beds/etc filters work right away
+    fetchAllAmenities();
   }
 
   // ─── Observe new cards (infinite scroll / React re-renders) ────────────────
@@ -68,8 +79,10 @@
         CheckIcon.injectAll(newListings, (listing, isSelected) => {
           onCheckToggle(listing, isSelected);
         });
-        // Sync disabled state if 3 already selected
         syncCheckStates();
+        newListings.forEach(l => fetchAmenities(l));
+        FilterPanel.update(state.allListings);
+        PrioritiesPanel.update(state.allListings);
       }
     });
     observer.observe(grid, { childList: true, subtree: true });
@@ -166,6 +179,7 @@
       onPanelSwap,
       onPanelDeselect
     );
+    FilterPanel.reposition();
   }
 
   function refreshPanel() {
@@ -176,6 +190,7 @@
       onPanelSwap,
       onPanelDeselect
     );
+    FilterPanel.reposition();
   }
 
   // ─── Check icon sync ───────────────────────────────────────────────────────
@@ -207,16 +222,27 @@
     }
 
     try {
-      console.log('[Extension] Requesting amenities for:', listing.url);
+      // Re-read price from card DOM at fetch time (dates may have been selected after scrape)
+      if (listing._cardEl) {
+        const freshPrice = AirbnbScraper.extractNightlyPrice(listing._cardEl);
+        if (freshPrice > 0) listing.nightlyPrice = freshPrice;
+      }
+      console.log('[Extension] nights:', AirbnbScraper.getSelectedNights(), '| nightlyPrice for', listing.id, ':', listing.nightlyPrice);
       chrome.runtime.sendMessage(
         { type: 'FETCH_AMENITIES', listingUrl: listing.url, listingId: listing.id },
         (response) => {
           if (chrome.runtime.lastError) return; // extension reloaded mid-flight
           if (response?.amenities) {
+            // If background fetch found no price, use the price scraped from the card DOM
+            if (!response.amenities.nightlyPrice && listing.nightlyPrice > 0) {
+              response.amenities.nightlyPrice = listing.nightlyPrice;
+            }
             listing.amenities = response.amenities;
             const match = state.allListings.find((l) => l.id === listing.id);
             if (match) match.amenities = response.amenities;
             if (state.compareActive) refreshPanel();
+            PrioritiesPanel.update(state.allListings);
+            FilterPanel.update(state.allListings);
           }
         }
       );
@@ -244,6 +270,8 @@
         state = { selectedListings: [], compareActive: false, allListings: [] };
         ComparisonPanel.hide();
         CompareButton.remove();
+        PrioritiesPanel.remove();
+        FilterPanel.remove();
         setTimeout(init, 800);
       }
     }

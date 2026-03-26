@@ -82,20 +82,17 @@ window.ComparisonPanel = {
     const amenities = listing.amenities || {};
     const guestCount = this._guestCount || 1;
 
-    // Price per person — use fetched nightlyPrice if available, otherwise parse from priceText
-    let pricePerPerson = null;
-    if (amenities.nightlyPrice && amenities.nightlyPrice > 0) {
-      pricePerPerson = Math.round(amenities.nightlyPrice / guestCount);
-    } else if (listing.priceText) {
-      const m = listing.priceText.match(/[\d,]+/);
-      if (m) pricePerPerson = Math.round(parseInt(m[0].replace(',', '')) / guestCount);
-    }
+    // Nightly price: prefer card DOM price (visible when dates selected), then background fetch
+    const nightlyPrice = (listing.nightlyPrice > 0 ? listing.nightlyPrice : null)
+      || (amenities.nightlyPrice > 0 ? amenities.nightlyPrice : null)
+      || AirbnbScraper.parsePriceText(listing.priceText);
 
+    const pricePerPerson = (nightlyPrice && guestCount > 0) ? Math.round(nightlyPrice / guestCount) : null;
     const priceDisplay = pricePerPerson ? `$${pricePerPerson.toLocaleString()}/pp` : '—';
 
     const dropdownOptions = this._allListings
       .map((l) => {
-        const label = l.locationTitle || l.title;
+        const label = l.title || l.locationTitle;
         return `<option value="${l.id}" ${l.id === listing.id ? 'selected' : ''}>${label}</option>`;
       })
       .join('');
@@ -171,5 +168,6 @@ window.ComparisonPanel = {
 
     const closeBtn = this.panel.querySelector('#airbnb-cp-close-btn');
     closeBtn?.addEventListener('click', () => onDeselect(null));
+
   },
 };

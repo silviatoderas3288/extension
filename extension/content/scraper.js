@@ -43,16 +43,25 @@ window.AirbnbScraper = {
       const id = idMatch[1];
       const url = href.startsWith('http') ? href : `https://www.airbnb.com${href}`;
 
-      // Property name — the actual listing name (e.g. "Stylish Oceanfront Suite with Pool")
-      const nameEl = card.querySelector('[data-testid="listing-card-name"]');
-      const name = nameEl?.textContent?.trim() || '';
-
-      // Location type (e.g. "Apartment in Nassau") — used as fallback
+      // listing-card-title is the property name row (e.g. "Cozy cabin in the mountains")
+      // listing-card-name is the subtitle/location row (e.g. "Cabin in Malibu")
       const titleEl = card.querySelector('[data-testid="listing-card-title"]');
-      const locationTitle = titleEl?.textContent?.trim() || 'Listing';
+      const nameEl  = card.querySelector('[data-testid="listing-card-name"]');
 
-      // Use property name as the primary display title; fall back to location type
-      const title = name || locationTitle;
+      const locationTitle = nameEl?.textContent?.trim() || '';
+
+      // Title: prefer the title test-id, fall back to name, then first div/span with 20+ chars
+      let title = titleEl?.textContent?.trim() || '';
+      if (!title) {
+        // Broader fallback: first text node of meaningful length that isn't a price/rating
+        const spans = card.querySelectorAll('div, span');
+        for (const el of spans) {
+          if (el.children.length > 0) continue;
+          const t = el.textContent.trim();
+          if (t.length >= 10 && !/^\$|^\d+(\.\d)?$|review/i.test(t)) { title = t; break; }
+        }
+      }
+      if (!title) title = locationTitle || 'Listing';
 
       // Beds
       const bedsText = this._findTextContaining(card, ['bed', 'bedroom', 'studio']);
@@ -60,12 +69,9 @@ window.AirbnbScraper = {
       // Saved dates
       const datesText = this._findTextContaining(card, ['saved for', 'apr', 'jan', 'feb', 'mar', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']);
 
-      // Price
-      const priceEl =
-        card.querySelector('[data-testid="price-availability-row"]') ||
-        card.querySelector('span[class*="price"]') ||
-        card.querySelector('[class*="_i5duul"]');
-      const priceText = priceEl?.textContent?.trim() || '';
+      // Price — try to read directly from the card DOM (visible when dates are selected)
+      const nightlyPrice = this.extractNightlyPrice(card);
+      const priceText = nightlyPrice ? `$${nightlyPrice}` : '';
 
       // Rating
       const ratingEl =
@@ -102,6 +108,7 @@ window.AirbnbScraper = {
         beds: bedsText,
         savedDates: datesText,
         priceText,
+        nightlyPrice,  // parsed from card DOM when dates are selected
         rating,
         reviewCount,
         photo,
@@ -112,6 +119,83 @@ window.AirbnbScraper = {
     } catch (e) {
       return null;
     }
+  },
+
+  /**
+   * Extract the nightly price as a number directly from a card element.
+   * Airbnb wishlist cards show the TOTAL price when dates are selected.
+   * We divide by the number of nights to get the nightly rate.
+   * Returns null if no reliable price is found.
+   */
+  extractNightlyPrice(card) {
+    // Try to get nights from URL first, then from card text (e.g. "5 nights", "total for 3 nights")
+    let nights = this.getSelectedNights();
+    if (!nights) {
+      const cardText = card.textContent || '';
+      const m = cardText.match(/(\d+)\s*night/i);
+      if (m) nights = parseInt(m[1]);
+    }
+    console.log('[Extension] extractNightlyPrice nights:', nights);
+    // Airbnb shows total price on wishlist cards when dates are selected.
+    // Divide by nights to get nightly rate. If no dates, treat as nightly already.
+    const toNightly = (total) => (nights > 1 ? Math.round(total / nights) : total);
+
+    // 1. Try specific test-id targets first
+    const specific = [
+      card.querySelector('[data-testid="listing-card-price"]'),
+      card.querySelector('[data-testid="price-availability-row"]'),
+    ].filter(Boolean);
+
+    for (const el of specific) {
+      const price = this._parseNightlyFromText(el.textContent);
+      if (price !== null) return toNightly(price);
+    }
+
+    // 2. Walk leaf text nodes — find a node whose text is just "$NNN"
+    const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const t = node.textContent.trim();
+      if (/^\$[\d,]+$/.test(t)) {
+        const n = parseFloat(t.replace(/[$,]/g, ''));
+        if (n > 0 && n < 100000) return toNightly(n);
+      }
+    }
+
+    // 3. Fallback: any element whose direct text contains "$NNN /night" pattern
+    const all = card.querySelectorAll('span, div');
+    for (const el of all) {
+      if (el.children.length > 3) continue;
+      const price = this._parseNightlyFromText(el.textContent);
+      if (price !== null) return toNightly(price);
+    }
+
+    return null;
+  },
+
+  /**
+   * Parse a nightly price from a text string.
+   * Matches "$120", "$1,200 / night", "$120/night", etc.
+   * Avoids total prices like "$600 for 5 nights".
+   */
+  _parseNightlyFromText(text) {
+    if (!text) return null;
+    const t = text.trim();
+    // Reject if it looks like a total ("for N nights")
+    if (/for\s+\d+\s+nights?/i.test(t)) return null;
+    // Match "$NNN" optionally followed by " / night" or "/night"
+    const m = t.match(/\$\s*([\d,]+)(?:\s*\/\s*night)?/i);
+    if (!m) return null;
+    const n = parseFloat(m[1].replace(/,/g, ''));
+    return (n > 0 && n < 100000) ? n : null;
+  },
+
+  /**
+   * Parse a price string into a number. Returns null on failure.
+   * Handles "$120", "$1,200", "€99", etc.
+   */
+  parsePriceText(text) {
+    return this._parseNightlyFromText(text);
   },
 
   /**
@@ -148,6 +232,19 @@ window.AirbnbScraper = {
     if (adults + children > 0) return adults + children;
 
     return 1;
+  },
+
+  /**
+   * Get the number of nights from the selected check_in / check_out dates.
+   * Returns null if dates are not selected.
+   */
+  getSelectedNights() {
+    const params = new URLSearchParams(window.location.search);
+    const checkIn  = params.get('check_in');
+    const checkOut = params.get('check_out');
+    if (!checkIn || !checkOut) return null;
+    const diff = (new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60 * 24);
+    return diff > 0 ? diff : null;
   },
 
   /**

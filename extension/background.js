@@ -106,11 +106,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Fetch and parse amenities + listing details from a listing detail page
 async function fetchAmenities(listingUrl) {
   try {
-    // Fetch the HTML page — all data is embedded in __NEXT_DATA__ JSON in the SSR output
-    const cleanUrl = listingUrl.replace(/\?.*$/, '');
-    const fullUrl = cleanUrl.startsWith('http') ? cleanUrl : `https://www.airbnb.com${cleanUrl}`;
+    // Keep check_in/check_out params — Airbnb only shows price when dates are present.
+    // Strip other tracking params but preserve dates and guest counts.
+    let fullUrl;
+    try {
+      const u = new URL(listingUrl.startsWith('http') ? listingUrl : `https://www.airbnb.com${listingUrl}`);
+      const keep = ['check_in','check_out','adults','children','infants','pets'];
+      const clean = new URL(u.origin + u.pathname);
+      for (const k of keep) { if (u.searchParams.has(k)) clean.searchParams.set(k, u.searchParams.get(k)); }
+      fullUrl = clean.toString();
+    } catch (e) {
+      fullUrl = listingUrl.replace(/\?.*$/, '');
+    }
+    console.log('[Extension] Fetching:', fullUrl);
     const res = await fetch(fullUrl);
+    console.log('[Extension] HTTP status:', res.status, 'for', fullUrl);
     const html = await res.text();
+    console.log('[Extension] HTML length:', html.length);
 
     let maxGuests = null;
     let baths = null;
@@ -181,8 +193,50 @@ async function fetchAmenities(listingUrl) {
 
     // ── Price: regex on raw HTML ──
     let nightlyPrice = null;
+
+    // Strategy 1: original working pattern — "price":{"amount":NNN}
     const priceJsonMatch = html.match(/"price"\s*:\s*\{\s*"amount"\s*:\s*(\d+)/);
     if (priceJsonMatch) nightlyPrice = parseInt(priceJsonMatch[1]);
+    if (nightlyPrice > 10000) nightlyPrice = Math.round(nightlyPrice / 100);
+    console.log('[Extension] Strategy 1 price:', nightlyPrice);
+
+
+    // Strategy 2: parse __NEXT_DATA__ JSON and search for structured price keys
+    if (!nightlyPrice && nextDataMatch) {
+      console.log('[Extension] __NEXT_DATA__ found, length:', nextDataMatch[1].length);
+      try {
+        const raw = nextDataMatch[1];
+        const dollarIdx = raw.search(/"\$\s*\d+"/);
+        if (dollarIdx !== -1) {
+          console.log('[Extension] First $ price in JSON:', JSON.stringify(raw.slice(Math.max(0, dollarIdx - 80), dollarIdx + 80)));
+        }
+        nightlyPrice = _extractStructuredPrice(raw);
+        console.log('[Extension] Strategy 2 structured price:', nightlyPrice);
+        if (!nightlyPrice) {
+          nightlyPrice = _extractPriceFromJson(JSON.parse(raw));
+          console.log('[Extension] Strategy 2 JSON walk price:', nightlyPrice);
+        }
+      } catch (e) {
+        console.log('[Extension] JSON parse error:', e.message);
+      }
+    }
+
+    // Strategy 3: broader regex fallback on raw HTML
+    if (!nightlyPrice) {
+      const pricePatterns = [
+        /"localizedPrice"\s*:\s*"\$\s*([\d,]+)"/,
+        /"formattedPrice"\s*:\s*"\$\s*([\d,]+)"/,
+        /"rate"\s*:\s*\{[^}]{0,60}"amount"\s*:\s*(\d+(?:\.\d+)?)/,
+        /"basePrice"\s*:\s*\{[^}]{0,60}"amount"\s*:\s*(\d+(?:\.\d+)?)/,
+      ];
+      for (const pattern of pricePatterns) {
+        const m = html.match(pattern);
+        if (m) {
+          const n = parseFloat(m[1].replace(/,/g, ''));
+          if (n > 0) { nightlyPrice = n > 10000 ? Math.round(n / 100) : n; break; }
+        }
+      }
+    }
 
     // ── Amenities: search the full HTML text ──
     const htmlLower = html.toLowerCase();
@@ -215,10 +269,77 @@ async function fetchAmenities(listingUrl) {
     else if (htmlLower.includes('strict')) result.cancellation = 'strict';
     else result.cancellation = 'unknown';
 
+    console.log('[Extension] Final nightlyPrice:', nightlyPrice, '| maxGuests:', maxGuests, '| beds:', beds, '| baths:', baths);
     console.log('[Extension] Parsed result:', JSON.stringify(result));
     return result;
   } catch (e) {
     console.error('[Extension] fetchAmenities error:', e);
     return {};
   }
+}
+
+// Search raw JSON string for Airbnb's structuredDisplayPrice / pdpDisplayPrice patterns.
+// These are more specific than the generic walker and less likely to match fees/taxes.
+function _extractStructuredPrice(raw) {
+  // Pattern: "price":"$123" inside structuredDisplayPrice or similar price display keys
+  const patterns = [
+    // structuredDisplayPrice > primaryLine > price: "$123"
+    /structuredDisplayPrice[^}]{0,300}"price"\s*:\s*"\$\s*([\d,]+)"/,
+    // pdpDisplayPrice > perNight / nightly
+    /pdpDisplayPrice[^}]{0,300}"\$\s*([\d,]+)"/,
+    // "displayPrice":"$123"
+    /"displayPrice"\s*:\s*"\$\s*([\d,]+)"/,
+    // "priceString":"$123"
+    /"priceString"\s*:\s*"\$\s*([\d,]+)"/,
+    // "price":"$123" (generic, earlier patterns take priority)
+    /"price"\s*:\s*"\$\s*([\d,]+)"/,
+    // per-night price: {"amount":NNN,"currency":"USD"} after "perNight" key
+    /"perNight"\s*:\s*\{[^}]{0,60}"amount"\s*:\s*([\d.]+)/,
+    // "publicPrice":{"amount":NNN
+    /"publicPrice"\s*:\s*\{[^}]{0,60}"amount"\s*:\s*([\d.]+)/,
+  ];
+  for (const pat of patterns) {
+    const m = raw.match(pat);
+    if (m) {
+      const n = parseFloat(m[1].replace(/,/g, ''));
+      if (n > 0 && n < 100000) {
+        const price = n > 10000 ? Math.round(n / 100) : n;
+        if (price > 0 && price < 100000) return price;
+      }
+    }
+  }
+  return null;
+}
+
+// Walk a parsed JSON object tree looking for a nightly price value.
+// Airbnb buries price in deeply nested structures — we search broadly.
+function _extractPriceFromJson(obj, depth = 0) {
+  if (depth > 12 || !obj || typeof obj !== 'object') return null;
+
+  // Direct price field patterns
+  const priceKeys = ['price', 'localizedPrice', 'formattedPrice', 'originalPrice', 'discountedPrice'];
+  for (const key of priceKeys) {
+    if (typeof obj[key] === 'string') {
+      const m = obj[key].match(/\$\s*([\d,]+)/);
+      if (m) {
+        const n = parseFloat(m[1].replace(/,/g, ''));
+        if (n > 0 && n < 100000) return n;
+      }
+    }
+  }
+
+  // amount + currency pattern
+  if (typeof obj.amount === 'number' && obj.currency) {
+    const n = obj.amount > 10000 ? Math.round(obj.amount / 100) : obj.amount;
+    if (n > 0 && n < 100000) return n;
+  }
+
+  // Recurse into children
+  for (const val of Object.values(obj)) {
+    if (val && typeof val === 'object') {
+      const found = _extractPriceFromJson(val, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
 }
