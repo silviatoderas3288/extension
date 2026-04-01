@@ -53,8 +53,6 @@ window.PrioritiesPanel = {
     this._wishlistKey = wishlistKey;
     this._allListings = allListings;
 
-    if (!this._hasCollaborators()) return;
-
     this._injectIcon();
 
     this._loadPriorities(() => { this._buildPanel(); });
@@ -63,12 +61,9 @@ window.PrioritiesPanel = {
   _injectIcon() {
     if (this._iconBtn) return;
 
-    const inviteBtn =
-      document.querySelector('[data-testid="invite-collaborators"]') ||
-      document.querySelector('[aria-label*="invite" i]') ||
-      document.querySelector('[data-el="share-wishlist"]');
-
-    if (!inviteBtn) return;
+    // Place the people button right after the Filters button in the header
+    const anchor = document.getElementById('airbnb-filters-btn') || document.getElementById('airbnb-compare-btn');
+    if (!anchor) return;
 
     const btn = document.createElement('button');
     btn.id = 'airbnb-priorities-icon';
@@ -81,7 +76,7 @@ window.PrioritiesPanel = {
       this._visible ? this.hide() : this.show();
     });
 
-    inviteBtn.after(btn);
+    anchor.after(btn);
     this._iconBtn = btn;
   },
 
@@ -180,6 +175,7 @@ window.PrioritiesPanel = {
             <div class="airbnb-pp-winner-name">${title}</div>
             <div class="airbnb-pp-winner-meta">
               ${r.totalPriorities > 0 ? `<span class="airbnb-pp-winner-score">${r.matchCount}/${r.totalPriorities} priorities matched</span>` : ''}
+              ${r.votes > 0 ? `<span class="airbnb-pp-winner-votes">👍 ${r.votes}</span>` : ''}
             </div>
             ${priorityChips ? `<div class="airbnb-pp-rank-chips" style="margin-top:6px">${priorityChips}</div>` : ''}
           </div>
@@ -203,6 +199,7 @@ window.PrioritiesPanel = {
             <div class="airbnb-pp-rank-name">${title}</div>
             <div class="airbnb-pp-rank-score">
               ${r.totalPriorities > 0 ? `${r.matchCount}/${r.totalPriorities} priorities` : ''}
+              ${r.votes > 0 ? ` · 👍 ${r.votes}` : ''}
             </div>
           </div>
         </div>
@@ -239,7 +236,7 @@ window.PrioritiesPanel = {
   },
 
   // ── Ranking logic ────────────────────────────────────────────────────────────
-  // Score = priority match percentage × 10
+  // Score = priority match % × 10 + thumbsUp × 2
 
   _rankListings(allListings) {
     const priorities = this._myPriorities;
@@ -257,9 +254,11 @@ window.PrioritiesPanel = {
           if (key === 'cancellation') return a.cancellation && a.cancellation !== 'unknown';
           return a[key] === true;
         });
-        const score = priorities.length > 0
+        const priorityScore = priorities.length > 0
           ? (matched.length / priorities.length) * 10
           : 0;
+        const votes = l.thumbsUp || 0;
+        const score = priorityScore + votes * 2;
 
         return {
           listing: l,
@@ -267,6 +266,7 @@ window.PrioritiesPanel = {
           matchCount: matched.length,
           matchedKeys: matched,
           totalPriorities: priorities.length,
+          votes,
         };
       })
       .filter(r => r.score > 0)

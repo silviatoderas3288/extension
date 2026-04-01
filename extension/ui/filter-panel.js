@@ -1,9 +1,11 @@
 // filter-panel.js
-// Deep Dive Filter — inline filter bar injected below the Quick Comparison panel,
-// spanning the full width of the wishlist content area (same as comparison panel).
+// Filter panel — injected in the wishlist content area.
+// Controlled by a "Filters" pill button in the wishlist header row.
 
 window.FilterPanel = {
   panel: null,
+  _filtersBtn: null,
+  _filtersVisible: false,
   _allListings: [],
   _onFilterChange: null,
 
@@ -48,33 +50,90 @@ window.FilterPanel = {
     );
   },
 
+  _findHeaderRow() {
+    const shareBtn = document.querySelector('[data-el="share-wishlist"]');
+    if (shareBtn) return shareBtn.parentElement;
+    const chipsRow = document.querySelector('#filter-menu-chip-group > div:not([id])');
+    if (chipsRow) return chipsRow;
+    return null;
+  },
+
   inject(allListings, onFilterChange, onExpand) {
     this._allListings = allListings;
     this._onFilterChange = onFilterChange;
     this._onExpand = onExpand || null;
+    this._injectFiltersBtn();
     this._buildPanel();
   },
+
+  // ── Header row "Filters" button ───────────────────────────────────────────
+
+  _injectFiltersBtn() {
+    if (this._filtersBtn) return;
+
+    const row = this._findHeaderRow();
+    if (!row) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'airbnb-filters-btn';
+    btn.textContent = 'Filters';
+    btn.className = 'airbnb-compare-btn';
+    btn.setAttribute('aria-pressed', 'false');
+
+    btn.addEventListener('click', () => {
+      this._filtersVisible ? this._hidePanel() : this._showPanel();
+    });
+
+    row.appendChild(btn);
+    this._filtersBtn = btn;
+  },
+
+  _showPanel() {
+    if (!this.panel) this._buildPanel();
+    this.panel.style.display = '';
+    this._filtersVisible = true;
+    this._filtersBtn?.setAttribute('aria-pressed', 'true');
+    this._filtersBtn?.classList.add('airbnb-compare-btn--active');
+    if (this._onExpand) this._onExpand();
+  },
+
+  _hidePanel() {
+    if (this.panel) this.panel.style.display = 'none';
+    this._filtersVisible = false;
+    this._filtersBtn?.setAttribute('aria-pressed', 'false');
+    this._filtersBtn?.classList.remove('airbnb-compare-btn--active');
+  },
+
+  // ── Panel ─────────────────────────────────────────────────────────────────
 
   _buildPanel() {
     if (this.panel) this.panel.remove();
 
-    const amenityChips = this._amenityList.map(a =>
-      `<button type="button" class="airbnb-fb-chip" data-amenity="${a.key}">${a.label}</button>`
+    const chevron = `<svg class="airbnb-fb-dd-chevron" width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="#FF395C" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>`;
+
+    const amenityOptions = this._amenityList.map(a =>
+      `<label class="airbnb-fb-dd-item"><input type="checkbox" class="airbnb-fb-dd-cb" data-amenity="${a.key}" /><span>${a.label}</span></label>`
+    ).join('');
+
+    const cancelOptions = [
+      { key: 'flexible', label: 'Flexible' },
+      { key: 'moderate', label: 'Moderate' },
+      { key: 'strict',   label: 'Strict' },
+    ].map(c =>
+      `<label class="airbnb-fb-dd-item"><input type="checkbox" class="airbnb-fb-dd-cb" data-cancel="${c.key}" /><span>${c.label}</span></label>`
     ).join('');
 
     const panel = document.createElement('div');
     panel.id = 'airbnb-filter-bar';
     panel.className = 'airbnb-fb-panel';
+    panel.style.display = 'none';
     panel.innerHTML = `
-      <div class="airbnb-fb-header" id="airbnb-fb-toggle" role="button" aria-expanded="false" tabindex="0">
-        <span class="airbnb-fb-title">Deep Dive</span>
+      <div class="airbnb-fb-header">
+        <span class="airbnb-fb-title">Filters</span>
         <span class="airbnb-fb-count" id="airbnb-fb-count"></span>
-        <button class="airbnb-fb-clear" id="airbnb-fb-clear" style="display:none">Clear all</button>
-        <svg class="airbnb-fb-chevron" id="airbnb-fb-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M4 6L8 10L12 6" stroke="#FF395C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <button class="airbnb-fb-close-btn" id="airbnb-fb-close" aria-label="Close filters">&#x2715;</button>
       </div>
-      <div class="airbnb-fb-row" id="airbnb-fb-body" style="display:none">
+      <div class="airbnb-fb-row" id="airbnb-fb-body">
         <div class="airbnb-fb-group">
           <label class="airbnb-fb-label">Price / night</label>
           <div class="airbnb-fb-price-row">
@@ -82,15 +141,6 @@ window.FilterPanel = {
             <span class="airbnb-fb-dash">–</span>
             <input type="number" class="airbnb-fb-input airbnb-fb-input--sm" id="airbnb-fb-max-price" placeholder="Max $" min="0" />
           </div>
-        </div>
-
-        <div class="airbnb-fb-group">
-          <label class="airbnb-fb-label" for="airbnb-fb-sort-select">Sort by price</label>
-          <select class="airbnb-fb-select" id="airbnb-fb-sort-select">
-            <option value="">Default</option>
-            <option value="asc">Low → High</option>
-            <option value="desc">High → Low</option>
-          </select>
         </div>
 
         <div class="airbnb-fb-group">
@@ -120,25 +170,42 @@ window.FilterPanel = {
           </div>
         </div>
 
-        <div class="airbnb-fb-group airbnb-fb-group--rating">
-          <label class="airbnb-fb-label">Min rating: <span id="airbnb-fb-rating-val">Any</span></label>
-          <input type="range" class="airbnb-fb-slider" id="airbnb-fb-rating" min="0" max="5" step="0.1" value="0" />
+        <div class="airbnb-fb-group">
+          <label class="airbnb-fb-label">Min rating</label>
+          <div class="airbnb-fb-stepper airbnb-fb-stepper--rating">
+            <input type="range" class="airbnb-fb-slider" id="airbnb-fb-rating" min="0" max="5" step="0.1" value="0" />
+            <span class="airbnb-fb-step-val" id="airbnb-fb-rating-val">Any</span>
+          </div>
         </div>
 
-        <div class="airbnb-fb-group airbnb-fb-group--wide">
-          <label class="airbnb-fb-label">Must have</label>
-          <div class="airbnb-fb-chips" id="airbnb-fb-amenity-chips">
-            ${amenityChips}
+        <div class="airbnb-fb-group">
+          <label class="airbnb-fb-label">Amenities</label>
+          <div class="airbnb-fb-multiselect" id="airbnb-fb-amenities-dd">
+            <button type="button" class="airbnb-fb-dd-trigger" id="airbnb-fb-amenities-trigger">Any ${chevron}</button>
+            <div class="airbnb-fb-dd-menu" id="airbnb-fb-amenities-menu" style="display:none">${amenityOptions}</div>
           </div>
         </div>
 
         <div class="airbnb-fb-group">
           <label class="airbnb-fb-label">Cancellation</label>
-          <div class="airbnb-fb-chips" id="airbnb-fb-cancel-chips">
-            <button type="button" class="airbnb-fb-chip" data-cancel="flexible">Flexible</button>
-            <button type="button" class="airbnb-fb-chip" data-cancel="moderate">Moderate</button>
-            <button type="button" class="airbnb-fb-chip" data-cancel="strict">Strict</button>
+          <div class="airbnb-fb-multiselect" id="airbnb-fb-cancel-dd">
+            <button type="button" class="airbnb-fb-dd-trigger" id="airbnb-fb-cancel-trigger">Any ${chevron}</button>
+            <div class="airbnb-fb-dd-menu" id="airbnb-fb-cancel-menu" style="display:none">${cancelOptions}</div>
           </div>
+        </div>
+
+        <div class="airbnb-fb-group">
+          <label class="airbnb-fb-label" for="airbnb-fb-sort-select">Sort by price</label>
+          <select class="airbnb-fb-select" id="airbnb-fb-sort-select">
+            <option value="">Default</option>
+            <option value="asc">Price: Low → High</option>
+            <option value="desc">Price: High → Low</option>
+            <option value="votes">Most 👍 votes</option>
+          </select>
+        </div>
+
+        <div class="airbnb-fb-group airbnb-fb-group--clear">
+          <button class="airbnb-fb-clear" id="airbnb-fb-clear" style="display:none">Clear all</button>
         </div>
       </div>
     `;
@@ -163,25 +230,9 @@ window.FilterPanel = {
   _attachListeners() {
     if (!this.panel) return;
 
-    // Collapse toggle
-    const toggleBtn = this.panel.querySelector('#airbnb-fb-toggle');
-    const body = this.panel.querySelector('#airbnb-fb-body');
-    const chevron = this.panel.querySelector('#airbnb-fb-chevron');
-    const clearBtn = this.panel.querySelector('#airbnb-fb-clear');
-
-    const doToggle = (e) => {
-      if (e.target === clearBtn || clearBtn?.contains(e.target)) return;
-      const expanded = toggleBtn.getAttribute('aria-expanded') === 'true';
-      toggleBtn.setAttribute('aria-expanded', String(!expanded));
-      body.style.display = expanded ? 'none' : 'flex';
-      chevron.style.transform = expanded ? '' : 'rotate(180deg)';
-      // Fire onExpand when opening so the caller can pre-fetch amenities
-      if (!expanded && this._onExpand) this._onExpand();
-    };
-
-    toggleBtn?.addEventListener('click', doToggle);
-    toggleBtn?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doToggle(e); }
+    // Close button hides the panel and deactivates the Filters button
+    this.panel.querySelector('#airbnb-fb-close')?.addEventListener('click', () => {
+      this._hidePanel();
     });
 
     const minPrice = this.panel.querySelector('#airbnb-fb-min-price');
@@ -224,31 +275,40 @@ window.FilterPanel = {
       this._applyFilters();
     });
 
-    this.panel.querySelectorAll('[data-amenity]').forEach(chip => {
-      chip.addEventListener('click', () => {
-        const key = chip.dataset.amenity;
-        if (this._filters.amenities.includes(key)) {
-          this._filters.amenities = this._filters.amenities.filter(k => k !== key);
-          chip.classList.remove('airbnb-fb-chip--active');
-        } else {
-          this._filters.amenities.push(key);
-          chip.classList.add('airbnb-fb-chip--active');
-        }
+    // Must have multiselect dropdown
+    this._bindMultiselect(
+      '#airbnb-fb-amenities-dd', '#airbnb-fb-amenities-trigger', '#airbnb-fb-amenities-menu',
+      '[data-amenity]',
+      (cb) => {
+        const key = cb.dataset.amenity;
+        if (cb.checked) { if (!this._filters.amenities.includes(key)) this._filters.amenities.push(key); }
+        else { this._filters.amenities = this._filters.amenities.filter(k => k !== key); }
+        this._setTriggerLabel('#airbnb-fb-amenities-trigger', this._filters.amenities);
         this._applyFilters();
-      });
-    });
+      }
+    );
 
-    this.panel.querySelectorAll('[data-cancel]').forEach(chip => {
-      chip.addEventListener('click', () => {
-        const val = chip.dataset.cancel;
-        if (this._filters.cancellation.includes(val)) {
-          this._filters.cancellation = this._filters.cancellation.filter(v => v !== val);
-          chip.classList.remove('airbnb-fb-chip--active');
-        } else {
-          this._filters.cancellation.push(val);
-          chip.classList.add('airbnb-fb-chip--active');
-        }
+    // Cancellation multiselect dropdown
+    this._bindMultiselect(
+      '#airbnb-fb-cancel-dd', '#airbnb-fb-cancel-trigger', '#airbnb-fb-cancel-menu',
+      '[data-cancel]',
+      (cb) => {
+        const val = cb.dataset.cancel;
+        if (cb.checked) { if (!this._filters.cancellation.includes(val)) this._filters.cancellation.push(val); }
+        else { this._filters.cancellation = this._filters.cancellation.filter(v => v !== val); }
+        this._setTriggerLabel('#airbnb-fb-cancel-trigger', this._filters.cancellation);
         this._applyFilters();
+      }
+    );
+
+    // Close dropdowns on outside click
+    document.addEventListener('click', (e) => {
+      if (!this.panel) return;
+      this.panel.querySelectorAll('.airbnb-fb-multiselect').forEach(dd => {
+        if (!dd.contains(e.target)) {
+          dd.querySelector('.airbnb-fb-dd-menu')?.style && (dd.querySelector('.airbnb-fb-dd-menu').style.display = 'none');
+          dd.querySelector('.airbnb-fb-dd-trigger')?.classList.remove('airbnb-fb-dd-trigger--open');
+        }
       });
     });
 
@@ -257,19 +317,44 @@ window.FilterPanel = {
     });
   },
 
+  _bindMultiselect(ddSel, triggerSel, menuSel, cbSel, onChange) {
+    const dd = this.panel.querySelector(ddSel);
+    const trigger = this.panel.querySelector(triggerSel);
+    const menu = this.panel.querySelector(menuSel);
+    if (!trigger || !menu) return;
+
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = menu.style.display !== 'none';
+      // Close all menus first
+      this.panel.querySelectorAll('.airbnb-fb-dd-menu').forEach(m => (m.style.display = 'none'));
+      this.panel.querySelectorAll('.airbnb-fb-dd-trigger').forEach(t => t.classList.remove('airbnb-fb-dd-trigger--open'));
+      if (!isOpen) {
+        menu.style.display = 'block';
+        trigger.classList.add('airbnb-fb-dd-trigger--open');
+      }
+    });
+
+    menu.addEventListener('click', (e) => e.stopPropagation());
+    menu.querySelectorAll(cbSel).forEach(cb => cb.addEventListener('change', () => onChange(cb)));
+  },
+
+  _setTriggerLabel(triggerSel, selectedArr) {
+    const trigger = this.panel?.querySelector(triggerSel);
+    if (!trigger) return;
+    const chevron = `<svg class="airbnb-fb-dd-chevron" width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="#FF395C" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>`;
+    trigger.innerHTML = `${selectedArr.length === 0 ? 'Any' : `${selectedArr.length} selected`} ${chevron}`;
+    trigger.classList.toggle('airbnb-fb-dd-trigger--active', selectedArr.length > 0);
+  },
+
   // Find the correct DOM element to show/hide for a listing.
-  // Re-resolves from the live DOM so stale _cardEl references don't matter.
   _getHideTarget(listing) {
-    // Find the link to this listing's room page in the live DOM
     const link = document.querySelector(`a[href*="/rooms/${listing.id}"]`);
     if (!link) return null;
 
-    // Walk up until we find an element whose parent is a grid/flex container
-    // that also contains other listing cards — that's the grid cell to hide.
     let el = link.parentElement;
     while (el && el.parentElement) {
       const parent = el.parentElement;
-      // If the parent has multiple children and at least one sibling has a rooms link, this is the grid cell
       if (parent.children.length > 1) {
         const hasSiblingCard = Array.from(parent.children).some(
           child => child !== el && child.querySelector('a[href*="/rooms/"]')
@@ -279,7 +364,6 @@ window.FilterPanel = {
       el = parent;
     }
 
-    // Fallback: hide the card element itself
     return listing._cardEl || null;
   },
 
@@ -341,26 +425,29 @@ window.FilterPanel = {
   },
 
   _applySortInDOM() {
-    // Collect all visible listings that have a price (amenities or card DOM)
     const getPrice = l => (l.amenities?.nightlyPrice > 0 ? l.amenities.nightlyPrice : null) || (l.nightlyPrice > 0 ? l.nightlyPrice : null);
-    const withPrice = this._allListings
-      .filter(l => getPrice(l) !== null)
-      .sort((a, b) => this._sortPrice === 'asc'
-        ? getPrice(a) - getPrice(b)
-        : getPrice(b) - getPrice(a)
-      );
+    const getVotes = l => l.thumbsUp || 0;
 
-    if (withPrice.length < 2) return;
+    let sorted;
+    if (this._sortPrice === 'votes') {
+      sorted = [...this._allListings].sort((a, b) => getVotes(b) - getVotes(a));
+    } else {
+      sorted = this._allListings
+        .filter(l => getPrice(l) !== null)
+        .sort((a, b) => this._sortPrice === 'asc'
+          ? getPrice(a) - getPrice(b)
+          : getPrice(b) - getPrice(a)
+        );
+    }
 
-    // Find the grid container from the first listing
-    const firstTarget = this._getHideTarget(withPrice[0]);
+    if (sorted.length < 2) return;
+
+    const firstTarget = this._getHideTarget(sorted[0]);
     if (!firstTarget) return;
     const grid = firstTarget.parentElement;
     if (!grid) return;
 
-    // Move each card's grid cell to the end of the grid in sorted order
-    // (visible ones in price order, hidden ones don't matter)
-    withPrice.forEach(listing => {
+    sorted.forEach(listing => {
       const el = this._getHideTarget(listing);
       if (el && el.parentElement === grid && el.style.display !== 'none') {
         grid.appendChild(el);
@@ -406,9 +493,9 @@ window.FilterPanel = {
       const ratingVal = this.panel.querySelector('#airbnb-fb-rating-val');
       if (ratingVal) ratingVal.textContent = 'Any';
 
-      this.panel.querySelectorAll('[data-amenity], [data-cancel]').forEach(chip => {
-        chip.classList.remove('airbnb-fb-chip--active');
-      });
+      this.panel.querySelectorAll('.airbnb-fb-dd-cb').forEach(cb => { cb.checked = false; });
+      this._setTriggerLabel('#airbnb-fb-amenities-trigger', []);
+      this._setTriggerLabel('#airbnb-fb-cancel-trigger', []);
       this._sortPrice = null;
       const sortSel = this.panel.querySelector('#airbnb-fb-sort-select');
       if (sortSel) sortSel.value = '';
@@ -422,7 +509,14 @@ window.FilterPanel = {
     this._applyFilters();
   },
 
-  // Called after comparison panel renders so Deep Dive stays below it
+  sortByVotes() {
+    this._sortPrice = 'votes';
+    const sel = this.panel?.querySelector('#airbnb-fb-sort-select');
+    if (sel) sel.value = 'votes';
+    this._applySortInDOM();
+  },
+
+  // Called after comparison panel renders so Filters panel stays below it
   reposition() {
     if (!this.panel) return;
     const target = this._findInsertionTarget();
@@ -440,6 +534,9 @@ window.FilterPanel = {
     });
     this.panel?.remove();
     this.panel = null;
+    this._filtersBtn?.remove();
+    this._filtersBtn = null;
+    this._filtersVisible = false;
     this._allListings = [];
     this._filters = {
       minPrice: null, maxPrice: null,

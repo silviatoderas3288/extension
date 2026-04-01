@@ -36,6 +36,35 @@
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
 
+# 7. Explicit Output format
+- For any feature request: ALWAYS output in this order:
+  1. Architecture diagram (ASCII or text description)
+  2. Why this design? (trade-offs, constraint checks)
+  3. Implementation code (with inline comments on non-obvious decisions)
+  4. Verification checklist (specific test commands, expected outputs, edge cases)
+  5. Next steps + potential pitfalls
+- If the user doesn't ask for this format, ask what they want instead
+
+Reference the Design System & API Conventions
+- When outputting code: mention which design files it follows
+  - If building UI: "This respects design-system.md (colors, buttons, spacing)"
+  - If building API: "This respects api-conventions.md (validation, response shape, SQL safety)"
+  - If explaining: "This uses explain-code.md patterns (analogy → diagram → walkthrough)"
+- Make references explicit so user can verify compliance
+
+
+## 8. Test each feature
+- Never move to the next feature until current feature is verified
+- If user tries to stack features without testing: flag it
+- "Feature #1 has untested paths. Should we test it before Feature #2?"
+- This prevents cascading bugs where Feature #2 depends on broken Feature #1
+
+## 9. Time-Box and Escalate
+- Track time per feature (user will give budget, e.g., "15 min for this")
+- If approach is taking longer than expected: surface it immediately
+- "This architecture is taking longer than expected. Should we simplify or escalate to interviewer?"
+- Don't thrash silently. Escalate early.
+
 ---
 
 # Task Management
@@ -54,3 +83,5 @@
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+
+

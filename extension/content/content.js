@@ -45,24 +45,30 @@
     state.allListings = AirbnbScraper.scrapeAll();
     if (state.allListings.length === 0) return;
 
-    // Inject Compare button
-    CompareButton.inject((active) => onCompareToggle(active));
-
     // Inject check icons on cards
     CheckIcon.injectAll(state.allListings, (listing, isSelected) => {
       onCheckToggle(listing, isSelected);
     });
 
-    // Inject Priorities panel
     const wishlistKey = window.location.pathname.match(/\/wishlists\/[^/?]+/)?.[0] || '';
-    PrioritiesPanel.inject(wishlistKey, state.allListings);
-
-    // Inject Deep Dive filter panel
     const fetchAllAmenities = () => state.allListings.forEach(l => fetchAmenities(l));
+
+    // Inject Filters button (header) + filter panel (content area) first,
+    // so the Filters button exists before PrioritiesPanel places the people icon after it.
     FilterPanel.inject(state.allListings, () => syncCheckStates(), fetchAllAmenities);
+
+    // Inject Quick Compare button into the content area
+    CompareButton.inject((active) => onCompareToggle(active));
+
+    // Inject Priorities panel — people icon goes after the Filters button in the header
+    PrioritiesPanel.inject(wishlistKey, state.allListings);
 
     // Pre-fetch amenities for all listings immediately so price/beds/etc filters work right away
     fetchAllAmenities();
+
+    // Auto-sort by votes on load if any listing has votes
+    const hasVotes = state.allListings.some(l => l.thumbsUp > 0);
+    if (hasVotes) FilterPanel.sortByVotes();
   }
 
   // ─── Observe new cards (infinite scroll / React re-renders) ────────────────

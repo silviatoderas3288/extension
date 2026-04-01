@@ -100,6 +100,19 @@ window.AirbnbScraper = {
       const badgeEl = card.querySelector('[class*="superhost"], [aria-label*="Superhost"], [class*="guest-favorite"]');
       const badge = badgeEl?.textContent?.trim() || null;
 
+      // Thumbs up votes — count elements whose aria-label contains "Voted yes"
+      const voteEls = card.querySelectorAll('[class*="h12f57v3"], [class*="atm_3f_idpfg4"]');
+      let thumbsUp = 0;
+      voteEls.forEach(el => {
+        if (/voted yes/i.test(el.textContent)) thumbsUp++;
+      });
+      // Fallback: scan all text nodes for "Voted yes"
+      if (thumbsUp === 0) {
+        card.querySelectorAll('div, span').forEach(el => {
+          if (el.children.length === 0 && /voted yes/i.test(el.textContent)) thumbsUp++;
+        });
+      }
+
       return {
         id,
         url,
@@ -114,6 +127,7 @@ window.AirbnbScraper = {
         photo,
         guestText,
         badge,
+        thumbsUp,      // count of "Voted yes" from Airbnb's native collaborative voting
         amenities: null, // fetched lazily
       };
     } catch (e) {
@@ -135,7 +149,6 @@ window.AirbnbScraper = {
       const m = cardText.match(/(\d+)\s*night/i);
       if (m) nights = parseInt(m[1]);
     }
-    console.log('[Extension] extractNightlyPrice nights:', nights);
     // Airbnb shows total price on wishlist cards when dates are selected.
     // Divide by nights to get nightly rate. If no dates, treat as nightly already.
     const toNightly = (total) => (nights > 1 ? Math.round(total / nights) : total);

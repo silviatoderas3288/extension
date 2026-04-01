@@ -1,35 +1,28 @@
 // compare-button.js
-// Injects the "Compare" pill button into the Airbnb wishlist trip header
+// Injects the "Quick Compare" pill button just below the dates/header row
 
 window.CompareButton = {
   button: null,
   _wrapper: null,
 
   /**
-   * Find the row that contains the "Add dates / guests / Share" buttons.
-   * This is the row we want to put Compare on the far right of.
+   * Find the flex row that contains the Share / dates / guests buttons.
+   * Inserting after this row places the button visually below it (under the dates button).
    */
-  _findButtonRow() {
-    // The Share button is a direct child of the flex row — its parentElement IS the flex container
+  _findHeaderRow() {
     const shareBtn = document.querySelector('[data-el="share-wishlist"]');
     if (shareBtn) return shareBtn.parentElement;
-
-    // Fallback: the first non-labelled div child of #filter-menu-chip-group
     const chipsRow = document.querySelector('#filter-menu-chip-group > div:not([id])');
     if (chipsRow) return chipsRow;
-
     return null;
   },
 
   /**
-   * Create and inject the Compare button, right-aligned in the header row.
+   * Create and inject the Compare button right below the dates/header row.
    * @param {Function} onClick - callback when Compare is clicked
    */
   inject(onClick) {
     if (this.button) return; // already injected
-
-    const row = this._findButtonRow();
-    if (!row) return;
 
     const btn = document.createElement('button');
     btn.id = 'airbnb-compare-btn';
@@ -42,9 +35,21 @@ window.CompareButton = {
       onClick(!active);
     });
 
-    row.appendChild(btn);
+    const wrapper = document.createElement('div');
+    wrapper.id = 'airbnb-compare-btn-wrapper';
+    wrapper.className = 'airbnb-compare-btn-wrapper';
+    wrapper.appendChild(btn);
+
+    const headerRow = this._findHeaderRow();
+    if (headerRow) {
+      // Insert right after the header row so Quick Compare sits below the dates button
+      headerRow.insertAdjacentElement('afterend', wrapper);
+    } else {
+      document.body.prepend(wrapper);
+    }
+
     this.button = btn;
-    this._wrapper = btn;
+    this._wrapper = wrapper;
   },
 
   /**
