@@ -460,8 +460,8 @@
 }
 
 .airbnb-pp-rank-item--1 { border-left-color: #ff395c; }
-.airbnb-pp-rank-item--2 { border-left-color: #ff8c00; }
-.airbnb-pp-rank-item--3 { border-left-color: #888; }
+.airbnb-pp-rank-item--2 { border-left-color: #ccc; }
+.airbnb-pp-rank-item--3 { border-left-color: #ccc; }
 
 .airbnb-pp-rank-top {
   display: flex;
@@ -482,6 +482,10 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.airbnb-pp-rank-badge--grey {
+  background: #bbb;
 }
 
 .airbnb-pp-rank-info {
@@ -531,6 +535,139 @@
   font-size: 13px;
   color: #aaa;
   padding: 12px 0;
+}
+
+/* Participant count pill in header */
+.airbnb-pp-participant-count {
+  font-size: 12px;
+  color: #888;
+  background: #f5f5f5;
+  border-radius: 20px;
+  padding: 2px 10px;
+  margin-left: 4px;
+}
+
+/* Share button */
+.airbnb-pp-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #ff395c;
+  background: none;
+  border: 1.5px solid #ff395c;
+  border-radius: 20px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  margin-left: auto;
+  transition: background 0.12s;
+}
+.airbnb-pp-share-btn:hover {
+  background: rgba(255, 57, 92, 0.07);
+}
+
+/* Name input row */
+.airbnb-pp-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.airbnb-pp-name-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.airbnb-pp-name-input {
+  border: 1.5px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  width: 200px;
+  transition: border-color 0.1s;
+  background: #fafafa;
+}
+.airbnb-pp-name-input:focus {
+  border-color: #ff395c;
+  background: #fff;
+}
+
+/* Other participants */
+.airbnb-pp-participant {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border-radius: 10px;
+  border: 1px solid #f0f0f0;
+}
+.airbnb-pp-participant-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.airbnb-pp-participant-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #222;
+}
+.airbnb-pp-participant-ago {
+  font-size: 11px;
+  color: #bbb;
+}
+.airbnb-pp-other-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.airbnb-pp-other-chip {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 12px;
+  background: rgba(255, 57, 92, 0.08);
+  color: #ff395c;
+  font-weight: 500;
+}
+
+/* Icon badge (participant count on icon) */
+.airbnb-pp-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #ff395c;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+/* Make icon button position:relative to anchor the badge */
+.airbnb-pp-icon-btn {
+  position: relative;
+}
+
+/* Footer hint */
+.airbnb-pp-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f0;
+}
+.airbnb-pp-sync-hint {
+  font-size: 11px;
+  color: #bbb;
 }
 
 @media (max-width: 900px) {
@@ -787,8 +924,8 @@
   border-radius: 10px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
   padding: 6px 4px;
-  min-width: 160px;
-  max-height: 260px;
+  min-width: 180px;
+  max-height: 400px;
   overflow-y: auto;
 }
 
@@ -808,6 +945,13 @@
 .airbnb-fb-dd-item:hover {
   background: rgba(255, 57, 92, 0.06);
   color: #ff395c;
+}
+
+.airbnb-fb-dd-loading {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #aaa;
+  font-style: italic;
 }
 
 .airbnb-fb-dd-cb {

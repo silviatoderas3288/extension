@@ -86,12 +86,19 @@ window.AirbnbScraper = {
       const reviewMatch = ratingText.match(/(\d+)\s*review/i);
       const reviewCount = reviewMatch ? parseInt(reviewMatch[1]) : null;
 
-      // Cover photo
-      const img =
-        card.querySelector('img[src*="muscache"]') ||
-        card.querySelector('img[class*="photo"]') ||
-        card.querySelector('img');
-      const photo = img?.src || img?.getAttribute('data-src') || '';
+      // Cover photo — always use the 1st photo in the carousel, not whichever slide is active.
+      // Airbnb lazy-loads carousel imgs with data-src/data-deferred-src before setting src,
+      // so we check those attributes first, then fall back to src.
+      const photoContainer = card.querySelector('[data-testid="card-container"]') || card;
+      const allImgs = Array.from(photoContainer.querySelectorAll('img'));
+      const firstCarouselImg = allImgs.find(i =>
+        (i.getAttribute('data-src') || i.getAttribute('data-deferred-src') || i.src || '').includes('muscache')
+      ) || allImgs[0];
+      const photo = firstCarouselImg
+        ? (firstCarouselImg.getAttribute('data-src') ||
+           firstCarouselImg.getAttribute('data-deferred-src') ||
+           firstCarouselImg.src || '')
+        : '';
 
       // Guest count
       const guestText = this._findTextContaining(card, ['guest', 'guests max', 'guests']);
@@ -142,16 +149,15 @@ window.AirbnbScraper = {
    * Returns null if no reliable price is found.
    */
   extractNightlyPrice(card) {
-    // Try to get nights from URL first, then from card text (e.g. "5 nights", "total for 3 nights")
+    // Try to get nights from URL first, then from card text (e.g. "5 nights")
     let nights = this.getSelectedNights();
     if (!nights) {
       const cardText = card.textContent || '';
       const m = cardText.match(/(\d+)\s*night/i);
       if (m) nights = parseInt(m[1]);
     }
-    // Airbnb shows total price on wishlist cards when dates are selected.
-    // Divide by nights to get nightly rate. If no dates, treat as nightly already.
-    const toNightly = (total) => (nights > 1 ? Math.round(total / nights) : total);
+    // Divide a total price by nights to get the nightly rate.
+    const toNightly = (total) => (nights && nights > 1 ? Math.round(total / nights) : total);
 
     // 1. Try specific test-id targets first
     const specific = [
@@ -162,45 +168,75 @@ window.AirbnbScraper = {
     for (const el of specific) {
       const price = this._parseNightlyFromText(el.textContent);
       if (price !== null) return toNightly(price);
+      // Also try "for N nights" total format
+      const total = this._parseTotalPrice(el.textContent);
+      if (total !== null) return toNightly(total);
     }
 
-    // 2. Walk leaf text nodes — find a node whose text is just "$NNN"
+    // 2. Walk leaf text nodes
     const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
       const t = node.textContent.trim();
+      if (!t.startsWith('$')) continue;
+      // Bare price: "$NNN" (common when "/night" is a separate text node)
       if (/^\$[\d,]+$/.test(t)) {
         const n = parseFloat(t.replace(/[$,]/g, ''));
         if (n > 0 && n < 100000) return toNightly(n);
       }
+      // Total price in one node: "$600 for 5 nights"
+      const total = this._parseTotalPrice(t);
+      if (total !== null) return toNightly(total);
     }
 
-    // 3. Fallback: any element whose direct text contains "$NNN /night" pattern
+    // 3. Fallback: any shallow element with a price pattern
     const all = card.querySelectorAll('span, div');
     for (const el of all) {
       if (el.children.length > 3) continue;
-      const price = this._parseNightlyFromText(el.textContent);
+      const txt = el.textContent;
+      const price = this._parseNightlyFromText(txt);
       if (price !== null) return toNightly(price);
+      const total = this._parseTotalPrice(txt);
+      if (total !== null) return toNightly(total);
     }
 
     return null;
   },
 
   /**
-   * Parse a nightly price from a text string.
-   * Matches "$120", "$1,200 / night", "$120/night", etc.
-   * Avoids total prices like "$600 for 5 nights".
+   * Parse a nightly price from text. Matches "$120", "$1,200 / night", etc.
+   * Rejects totals like "$600 for 5 nights" (handled by _parseTotalPrice).
    */
   _parseNightlyFromText(text) {
     if (!text) return null;
     const t = text.trim();
-    // Reject if it looks like a total ("for N nights")
-    if (/for\s+\d+\s+nights?/i.test(t)) return null;
-    // Match "$NNN" optionally followed by " / night" or "/night"
+    if (/for\s+\d+\s+nights?/i.test(t)) return null; // is a total, not nightly
     const m = t.match(/\$\s*([\d,]+)(?:\s*\/\s*night)?/i);
     if (!m) return null;
     const n = parseFloat(m[1].replace(/,/g, ''));
     return (n > 0 && n < 100000) ? n : null;
+  },
+
+  /**
+   * Parse a total-stay price from text like "$600 for 5 nights" or "$600 total".
+   * Returns the total amount (not divided by nights — caller does that).
+   */
+  _parseTotalPrice(text) {
+    if (!text) return null;
+    const t = text.trim();
+    // "$600 for 5 nights" — explicit total
+    const m = t.match(/\$([\d,]+)\s+for\s+\d+\s+nights?/i);
+    if (m) {
+      const n = parseFloat(m[1].replace(/,/g, ''));
+      return (n > 0 && n < 1000000) ? n : null;
+    }
+    // "$600 total"
+    const m2 = t.match(/\$([\d,]+)\s+total/i);
+    if (m2) {
+      const n = parseFloat(m2[1].replace(/,/g, ''));
+      return (n > 0 && n < 1000000) ? n : null;
+    }
+    return null;
   },
 
   /**

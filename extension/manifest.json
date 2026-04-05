@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "description": "Quickly compare Airbnb wishlist listings side by side",
   "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["https://www.airbnb.com/*"],
+  "host_permissions": [
+    "https://www.airbnb.com/*",
+    "https://*.firebaseio.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },

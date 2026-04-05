@@ -1,6 +1,45 @@
 // Background service worker
 // Manages per-tab comparison state and handles amenity fetching
 
+// ── Firebase Realtime Database config ────────────────────────────────────────
+// Create a free project at https://console.firebase.google.com
+// Enable Realtime Database, set rules to allow read/write (or auth-based rules)
+// Then paste your DB URL below (format: https://YOUR-PROJECT-default-rtdb.firebaseio.com)
+const FIREBASE_DB_URL = 'https://wishlist-collab-default-rtdb.firebaseio.com';
+
+// ── Stable per-browser user ID ───────────────────────────────────────────────
+async function getOrCreateUserId() {
+  return new Promise(resolve => {
+    chrome.storage.local.get('collabUserId', result => {
+      if (result.collabUserId) { resolve(result.collabUserId); return; }
+      const id = 'u_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
+      chrome.storage.local.set({ collabUserId: id }, () => resolve(id));
+    });
+  });
+}
+
+function wishlistDbKey(wishlistKey) {
+  // Firebase keys cannot contain . # $ / [ ]
+  return wishlistKey.replace(/[.#$[\]/]/g, '_');
+}
+
+async function firebaseGet(path) {
+  try {
+    const res = await fetch(`${FIREBASE_DB_URL}/${path}.json`);
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+async function firebasePut(path, data) {
+  try {
+    await fetch(`${FIREBASE_DB_URL}/${path}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  } catch { /* network error — will retry next save */ }
+}
+
 const tabState = {};
 
 function getTabKey(tabId) {
@@ -80,6 +119,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true; // keep channel open for async response
     }
 
+    // ── Legacy local-only priorities (kept for backward compat) ──────────────
     case 'GET_PRIORITIES': {
       const storageKey = 'priorities_' + (message.wishlistKey || '').replace(/\//g, '_');
       chrome.storage.sync.get(storageKey, (result) => {
@@ -92,6 +132,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const storageKey = 'priorities_' + (message.wishlistKey || '').replace(/\//g, '_');
       chrome.storage.sync.set({ [storageKey]: message.data }, () => {
         sendResponse({ ok: true });
+      });
+      return true;
+    }
+
+    // ── Collaborative priorities (Firebase-backed) ────────────────────────────
+
+    case 'GET_USER_ID': {
+      getOrCreateUserId().then(id => sendResponse({ userId: id }));
+      return true;
+    }
+
+    case 'GET_COLLAB_PRIORITIES': {
+      // Returns { participants: { userId: { name, priorities, updatedAt } } }
+      const dbKey = wishlistDbKey(message.wishlistKey || 'default');
+      firebaseGet(`wishlists/${dbKey}/participants`).then(participants => {
+        sendResponse({ participants: participants || {} });
+      });
+      return true;
+    }
+
+    case 'SAVE_COLLAB_PRIORITIES': {
+      // Saves this user's name + priorities to Firebase
+      const dbKey = wishlistDbKey(message.wishlistKey || 'default');
+      getOrCreateUserId().then(userId => {
+        const path = `wishlists/${dbKey}/participants/${userId}`;
+        const payload = {
+          name: message.name || 'Anonymous',
+          priorities: message.priorities || [],
+          updatedAt: Date.now(),
+        };
+        firebasePut(path, payload).then(() => sendResponse({ ok: true, userId }));
       });
       return true;
     }
@@ -238,8 +309,98 @@ async function fetchAmenities(listingUrl) {
       }
     }
 
-    // ── Amenities: search the full HTML text ──
+    // ── Amenities: full parse from __NEXT_DATA__ + keyword fallback ──────────────
     const htmlLower = html.toLowerCase();
+
+    // Walk a parsed JSON object tree looking for amenity objects.
+    // Airbnb amenity objects look like: { "title": "Hair dryer", "available": true, "icon": {...} }
+    // We detect them by the presence of both "title" (string) and "available" (boolean) fields.
+    function walkForAmenities(obj, found, depth) {
+      if (depth > 20 || !obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) {
+        for (const item of obj) walkForAmenities(item, found, depth + 1);
+        return;
+      }
+      // Amenity leaf: has both title and available fields
+      if (typeof obj.title === 'string' && typeof obj.available === 'boolean') {
+        if (obj.available && obj.title.length >= 2 && obj.title.length <= 80) {
+          found.add(obj.title.trim());
+        }
+        return; // Don't recurse deeper — this is a leaf amenity object
+      }
+      for (const val of Object.values(obj)) {
+        if (val && typeof val === 'object') walkForAmenities(val, found, depth + 1);
+      }
+    }
+
+    // Extract every amenity name from the structured JSON Airbnb embeds in the page.
+    // Returns an array of display-name strings for amenities that are marked available.
+    function extractAllAmenities(raw) {
+      if (!raw) return [];
+      const found = new Set();
+
+      // Strategy 1 — parse the full __NEXT_DATA__ JSON and walk the object tree.
+      // This handles any field ordering (title before/after available) and nested structures.
+      try {
+        walkForAmenities(JSON.parse(raw), found, 0);
+      } catch (e) {
+        // JSON parse failed (very large or malformed) — fall through to regex fallbacks
+      }
+
+      // Strategy 2 — regex fallback: find "available":true and search nearby for "title".
+      // Catches cases where the full JSON parse fails or is truncated.
+      if (found.size === 0) {
+        const availRe = /"available"\s*:\s*true/g;
+        let m;
+        while ((m = availRe.exec(raw)) !== null) {
+          const winStart = Math.max(0, m.index - 500);
+          const winEnd   = Math.min(raw.length, m.index + 500);
+          const win = raw.slice(winStart, winEnd);
+          const titleM = win.match(/"title"\s*:\s*"([^"]{2,80})"/);
+          if (titleM) found.add(titleM[1].trim());
+        }
+      }
+
+      // Strategy 3 — flat amenity name arrays: "amenities":["Wifi","Kitchen",...]
+      const arrRe = /"amenities"\s*:\s*\[([^\]]{1,8000})\]/g;
+      let m;
+      while ((m = arrRe.exec(raw)) !== null) {
+        const inner = m[1];
+        const strRe = /"([A-Za-z][^"]{1,78})"/g;
+        let sm;
+        while ((sm = strRe.exec(inner)) !== null) {
+          const s = sm[1].trim();
+          if (s.length >= 2 && !/[/\\{}[\]]/.test(s)) found.add(s);
+        }
+      }
+
+      return [...found].filter(s => s.length >= 2 && s.length <= 80);
+    }
+
+    // Pattern C — parse available amenities directly from rendered HTML row-title divs.
+    // Available amenities use id="pdp_v3_CATEGORY_NUM_LISTINGID-row-title" or
+    // id="security_camera_...-row-title" etc. Unavailable use id="pdp_unavailable_...-row-title".
+    // We skip pdp_unavailable_ via negative lookahead; unavailable divs also contain <span>/<del>
+    // which the [^<] content guard naturally rejects.
+    function extractAmenitiesFromHtml(rawHtml) {
+      const found = new Set();
+      const rowTitleRe = /<div[^>]+id="(?!pdp_unavailable_)[^"]*-row-title"[^>]*>\s*([^<\n]{2,80}?)\s*<\/div>/g;
+      let m;
+      while ((m = rowTitleRe.exec(rawHtml)) !== null) {
+        const name = m[1].trim();
+        if (name && name.length >= 2 && !name.startsWith('Unavailable:')) {
+          found.add(name);
+        }
+      }
+      return [...found];
+    }
+
+    const htmlAmenities = extractAmenitiesFromHtml(html);
+    const discoveredAmenities = nextDataMatch
+      ? [...new Set([...extractAllAmenities(nextDataMatch[1]), ...htmlAmenities])]
+      : htmlAmenities;
+
+    // Keep the boolean shorthand flags for backward compat (comparison panel, priorities)
     const amenityKeywords = {
       wifi: ['wifi', 'wi-fi', 'wireless internet'],
       kitchen: ['kitchen', 'kitchenette'],
@@ -262,6 +423,14 @@ async function fetchAmenities(listingUrl) {
     for (const [key, keywords] of Object.entries(amenityKeywords)) {
       result[key] = keywords.some((kw) => htmlLower.includes(kw));
     }
+
+    // allAmenities — the full discovered list, deduplicated and sorted.
+    // Used by the filter panel to build its dynamic dropdown.
+    result.allAmenities = discoveredAmenities.length > 0
+      ? discoveredAmenities
+      : Object.entries(amenityKeywords)
+          .filter(([key]) => result[key])
+          .map(([key]) => key); // fallback: just the keys that matched
 
     // Cancellation policy
     if (htmlLower.includes('flexible')) result.cancellation = 'flexible';

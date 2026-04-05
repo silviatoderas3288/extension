@@ -87,8 +87,21 @@ window.ComparisonPanel = {
       || (amenities.nightlyPrice > 0 ? amenities.nightlyPrice : null)
       || AirbnbScraper.parsePriceText(listing.priceText);
 
-    const pricePerPerson = (nightlyPrice && guestCount > 0) ? Math.round(nightlyPrice / guestCount) : null;
-    const priceDisplay = pricePerPerson ? `$${pricePerPerson.toLocaleString()}/pp` : '—';
+    // Total stay = nightly × nights. Only show per-person total when dates are selected.
+    const selectedNights = AirbnbScraper.getSelectedNights();
+    let priceDisplay = '—';
+    if (nightlyPrice) {
+      if (selectedNights && selectedNights > 0) {
+        const totalStay = nightlyPrice * selectedNights;
+        const perPerson = guestCount > 1 ? Math.round(totalStay / guestCount) : totalStay;
+        priceDisplay = guestCount > 1
+          ? `$${perPerson.toLocaleString()} / person`
+          : `$${totalStay.toLocaleString()} total`;
+      } else {
+        // No dates selected — show nightly price, flag that total needs dates
+        priceDisplay = `$${nightlyPrice.toLocaleString()} / night`;
+      }
+    }
 
     const dropdownOptions = this._allListings
       .map((l) => {

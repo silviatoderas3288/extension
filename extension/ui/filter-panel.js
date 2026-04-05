@@ -16,31 +16,14 @@ window.FilterPanel = {
     minBaths: null,
     minRating: null,
     minGuests: null,
-    amenities: [],
+    amenities: [],   // array of lowercased amenity labels
     cancellation: [],
   },
   _sortPrice: null, // null | 'asc' | 'desc'
 
-  _amenityList: [
-    { key: 'wifi',        label: 'Wifi' },
-    { key: 'kitchen',     label: 'Kitchen' },
-    { key: 'parking',     label: 'Parking' },
-    { key: 'pool',        label: 'Pool' },
-    { key: 'ac',          label: 'A/C' },
-    { key: 'washer',      label: 'Washer' },
-    { key: 'dryer',       label: 'Dryer' },
-    { key: 'tv',          label: 'TV' },
-    { key: 'hairDryer',   label: 'Hair Dryer' },
-    { key: 'beachAccess', label: 'Beach Access' },
-    { key: 'petsAllowed', label: 'Pets OK' },
-    { key: 'instantBook', label: 'Instant Book' },
-    { key: 'hotTub',      label: 'Hot Tub' },
-    { key: 'bbq',         label: 'BBQ' },
-    { key: 'gym',         label: 'Gym' },
-    { key: 'fan',         label: 'Fan' },
-    { key: 'elevator',    label: 'Elevator' },
-    { key: 'smokeAlarm',  label: 'Smoke Alarm' },
-  ],
+  // Dynamically built from real listing data as amenities arrive.
+  // Map: lowercased-label → display-label, sorted alphabetically.
+  _amenityMap: new Map(),
 
   _findInsertionTarget() {
     return (
@@ -108,12 +91,11 @@ window.FilterPanel = {
 
   _buildPanel() {
     if (this.panel) this.panel.remove();
+    this._collectAmenities(this._allListings); // seed from any already-loaded data
 
     const chevron = `<svg class="airbnb-fb-dd-chevron" width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="#FF395C" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>`;
 
-    const amenityOptions = this._amenityList.map(a =>
-      `<label class="airbnb-fb-dd-item"><input type="checkbox" class="airbnb-fb-dd-cb" data-amenity="${a.key}" /><span>${a.label}</span></label>`
-    ).join('');
+    const amenityOptions = this._buildAmenityOptions();
 
     const cancelOptions = [
       { key: 'flexible', label: 'Flexible' },
@@ -225,6 +207,59 @@ window.FilterPanel = {
 
     this.panel = panel;
     this._attachListeners();
+  },
+
+  // Build <label> HTML for every amenity currently in _amenityMap
+  _buildAmenityOptions() {
+    if (this._amenityMap.size === 0) {
+      return `<div class="airbnb-fb-dd-loading">Loading amenities…</div>`;
+    }
+    return [...this._amenityMap.entries()]
+      .map(([key, label]) => {
+        const checked = this._filters.amenities.includes(key) ? ' checked' : '';
+        return `<label class="airbnb-fb-dd-item"><input type="checkbox" class="airbnb-fb-dd-cb" data-amenity="${key}"${checked} /><span>${label}</span></label>`;
+      })
+      .join('');
+  },
+
+  // Scan all listings for their allAmenities arrays; add any new ones to _amenityMap.
+  // Returns true if new amenities were discovered.
+  _collectAmenities(allListings) {
+    const before = this._amenityMap.size;
+    for (const l of allListings) {
+      const list = l.amenities?.allAmenities;
+      if (!Array.isArray(list)) continue;
+      for (const label of list) {
+        const key = label.toLowerCase().trim();
+        if (key && !this._amenityMap.has(key)) {
+          this._amenityMap.set(key, label.trim());
+        }
+      }
+    }
+    // Keep sorted alphabetically by label
+    this._amenityMap = new Map(
+      [...this._amenityMap.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+    );
+    return this._amenityMap.size > before;
+  },
+
+  // Swap out just the amenity menu HTML and re-attach checkbox listeners only.
+  // Does NOT re-bind the trigger click — that was already done by _attachListeners
+  // and must not be duplicated (extra handlers would cause the menu to toggle closed).
+  _rebuildAmenitiesDropdown() {
+    const menu = this.panel?.querySelector('#airbnb-fb-amenities-menu');
+    if (!menu) return;
+    menu.innerHTML = this._buildAmenityOptions();
+    // Re-attach change listeners on the new checkboxes only
+    menu.querySelectorAll('[data-amenity]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const key = cb.dataset.amenity;
+        if (cb.checked) { if (!this._filters.amenities.includes(key)) this._filters.amenities.push(key); }
+        else { this._filters.amenities = this._filters.amenities.filter(k => k !== key); }
+        this._setTriggerLabel('#airbnb-fb-amenities-trigger', this._filters.amenities);
+        this._applyFilters();
+      });
+    });
   },
 
   _attachListeners() {
@@ -376,14 +411,14 @@ window.FilterPanel = {
       const a = listing.amenities || null;
       let pass = true;
 
-      // Price — use amenities.nightlyPrice first, then listing.nightlyPrice from card DOM
+      // Price filter: compare raw nightly price (no guest division)
       if (f.minPrice !== null || f.maxPrice !== null) {
-        const price = (a?.nightlyPrice > 0 ? a.nightlyPrice : null) || (listing.nightlyPrice > 0 ? listing.nightlyPrice : null);
-        if (price !== null) {
-          if (f.minPrice !== null && price < f.minPrice) pass = false;
-          if (f.maxPrice !== null && price > f.maxPrice) pass = false;
+        const nightlyPrice = (a?.nightlyPrice > 0 ? a.nightlyPrice : null) || (listing.nightlyPrice > 0 ? listing.nightlyPrice : null);
+        if (nightlyPrice !== null) {
+          if (f.minPrice !== null && nightlyPrice < f.minPrice) pass = false;
+          if (f.maxPrice !== null && nightlyPrice > f.maxPrice) pass = false;
         }
-        // price === null means no price available yet → leave visible, will re-filter on arrival
+        // nightlyPrice === null → no data yet, leave visible until it arrives
       }
 
       if (f.minRating !== null && (listing.rating == null || listing.rating < f.minRating)) pass = false;
@@ -394,8 +429,10 @@ window.FilterPanel = {
         if (f.minGuests !== null && (a.maxGuests == null || a.maxGuests < f.minGuests)) pass = false;
 
         if (f.amenities.length > 0) {
+          // f.amenities contains lowercased labels; match against allAmenities string array
+          const available = (a.allAmenities || []).map(s => s.toLowerCase());
           for (const key of f.amenities) {
-            if (a[key] !== true) { pass = false; break; }
+            if (!available.includes(key)) { pass = false; break; }
           }
         }
 
@@ -425,7 +462,11 @@ window.FilterPanel = {
   },
 
   _applySortInDOM() {
-    const getPrice = l => (l.amenities?.nightlyPrice > 0 ? l.amenities.nightlyPrice : null) || (l.nightlyPrice > 0 ? l.nightlyPrice : null);
+    // Sort key: raw nightly price
+    const getPrice = l => {
+      const nightly = (l.amenities?.nightlyPrice > 0 ? l.amenities.nightlyPrice : null) || (l.nightlyPrice > 0 ? l.nightlyPrice : null);
+      return nightly !== null ? nightly : null;
+    };
     const getVotes = l => l.thumbsUp || 0;
 
     let sorted;
@@ -506,6 +547,9 @@ window.FilterPanel = {
 
   update(allListings) {
     this._allListings = allListings;
+    // Collect any newly discovered amenities and refresh the dropdown if needed
+    const hadNew = this._collectAmenities(allListings);
+    if (hadNew) this._rebuildAmenitiesDropdown();
     this._applyFilters();
   },
 
