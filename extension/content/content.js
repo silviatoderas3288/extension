@@ -9,6 +9,9 @@
   // Bail out early to avoid uncaught errors from the stale script context.
   if (typeof chrome === 'undefined' || !chrome.runtime) return;
 
+  const { AirbnbScraper, CheckIcon, CompareButton, ComparisonPanel, FilterPanel, PrioritiesPanel } =
+    window.AirbnbCompare;
+
   let state = {
     selectedListings: [],
     compareActive: false,
@@ -98,7 +101,6 @@
 
   function onCheckToggle(listing, isSelected) {
     if (isSelected) {
-      if (state.selectedListings.length >= 3) return;
       if (!state.selectedListings.find((l) => l.id === listing.id)) {
         state.selectedListings.push(listing);
         // Fetch amenities for this listing in background
@@ -127,9 +129,12 @@
     CompareButton.setActive(active);
 
     if (active) {
-      // Auto-select top 3 if nothing is checked
+      // Auto-select all if nothing is checked, excluding listings not bookable for the
+      // selected dates. Fall back to everything if that filter would leave the panel empty
+      // (e.g. all unavailable, or the field isn't populated yet).
       if (state.selectedListings.length === 0) {
-        state.selectedListings = state.allListings.slice(0, 3);
+        const bookable = state.allListings.filter((l) => !l.unavailable);
+        state.selectedListings = bookable.length > 0 ? bookable : [...state.allListings];
         syncCheckStates();
       }
       state.selectedListings.forEach((l) => fetchAmenities(l));
@@ -203,13 +208,10 @@
 
   function syncCheckStates() {
     const selectedIds = state.selectedListings.map((l) => l.id);
-    const maxReached = selectedIds.length >= 3;
 
     state.allListings.forEach((listing) => {
       if (selectedIds.includes(listing.id)) {
         CheckIcon.setState(listing.id, 'filled');
-      } else if (maxReached) {
-        CheckIcon.setState(listing.id, 'none');
       } else {
         CheckIcon.setState(listing.id, 'unfilled');
       }
@@ -234,24 +236,33 @@
         if (freshPrice > 0) listing.nightlyPrice = freshPrice;
       }
       console.log('[Extension] nights:', AirbnbScraper.getSelectedNights(), '| nightlyPrice for', listing.id, ':', listing.nightlyPrice);
-      chrome.runtime.sendMessage(
-        { type: 'FETCH_AMENITIES', listingUrl: listing.url, listingId: listing.id },
-        (response) => {
-          if (chrome.runtime.lastError) return; // extension reloaded mid-flight
-          if (response?.amenities) {
-            // If background fetch found no price, use the price scraped from the card DOM
-            if (!response.amenities.nightlyPrice && listing.nightlyPrice > 0) {
-              response.amenities.nightlyPrice = listing.nightlyPrice;
+
+      // Fetch the listing page from the content script context (which has the user's Airbnb
+      // cookies). The background service worker has no cookies, so Airbnb returns a stripped
+      // bot-detection response without __NEXT_DATA__ when fetched from the background.
+      const listingUrl = listing.url;
+      fetch(listingUrl, { credentials: 'include' })
+        .then(res => res.text())
+        .then(html => {
+          chrome.runtime.sendMessage(
+            { type: 'PARSE_AMENITIES', html, listingUrl, listingId: listing.id },
+            (response) => {
+              if (chrome.runtime.lastError) return;
+              if (response?.amenities) {
+                if (!response.amenities.nightlyPrice && listing.nightlyPrice > 0) {
+                  response.amenities.nightlyPrice = listing.nightlyPrice;
+                }
+                listing.amenities = response.amenities;
+                const match = state.allListings.find((l) => l.id === listing.id);
+                if (match) match.amenities = response.amenities;
+                if (state.compareActive) refreshPanel();
+                PrioritiesPanel.update(state.allListings);
+                FilterPanel.update(state.allListings);
+              }
             }
-            listing.amenities = response.amenities;
-            const match = state.allListings.find((l) => l.id === listing.id);
-            if (match) match.amenities = response.amenities;
-            if (state.compareActive) refreshPanel();
-            PrioritiesPanel.update(state.allListings);
-            FilterPanel.update(state.allListings);
-          }
-        }
-      );
+          );
+        })
+        .catch(() => { listing.amenities = {}; });
     } catch (e) {
       listing.amenities = {};
     }

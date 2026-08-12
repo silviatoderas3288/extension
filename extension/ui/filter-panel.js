@@ -2,7 +2,8 @@
 // Filter panel — injected in the wishlist content area.
 // Controlled by a "Filters" pill button in the wishlist header row.
 
-window.FilterPanel = {
+window.AirbnbCompare = window.AirbnbCompare || {};
+window.AirbnbCompare.FilterPanel = {
   panel: null,
   _filtersBtn: null,
   _filtersVisible: false,
@@ -214,12 +215,67 @@ window.FilterPanel = {
     if (this._amenityMap.size === 0) {
       return `<div class="airbnb-fb-dd-loading">Loading amenities…</div>`;
     }
-    return [...this._amenityMap.entries()]
+    const items = [...this._amenityMap.entries()]
       .map(([key, label]) => {
         const checked = this._filters.amenities.includes(key) ? ' checked' : '';
         return `<label class="airbnb-fb-dd-item"><input type="checkbox" class="airbnb-fb-dd-cb" data-amenity="${key}"${checked} /><span>${label}</span></label>`;
       })
       .join('');
+    return `<input type="text" class="airbnb-fb-amenity-search" placeholder="Search amenities…" autocomplete="off" />${items}`;
+  },
+
+  // Canonical amenity groups: each entry is [aliases[], canonicalDisplayName].
+  // Any alias (matched by exact lowercase or substring) maps to the same display name.
+  _AMENITY_GROUPS: [
+    [['ac', 'air conditioning', 'central air', 'central air conditioning', 'a/c', 'airconditioning'], 'Air conditioning'],
+    [['wifi', 'wi-fi', 'wireless internet', 'wireless'], 'WiFi'],
+    [['kitchen', 'kitchenette', 'full kitchen'], 'Kitchen'],
+    [['coffee', 'coffee maker', 'nespresso', 'keurig', 'coffee machine', 'espresso machine'], 'Coffee maker'],
+    [['parking', 'free parking', 'free street parking', 'paid parking', 'garage'], 'Parking'],
+    [['pool', 'swimming pool', 'private pool', 'shared pool'], 'Pool'],
+    [['hot tub', 'jacuzzi', 'whirlpool', 'hottub'], 'Hot tub'],
+    [['washer', 'washing machine', 'washer/dryer', 'laundry'], 'Washer'],
+    [['dryer', 'clothes dryer'], 'Dryer'],
+    [['tv', 'hdtv', 'cable tv', 'smart tv', 'television'], 'TV'],
+    [['bbq', 'barbecue', 'grill', 'outdoor grill', 'bbq grill'], 'BBQ grill'],
+    [['gym', 'exercise equipment', 'fitness', 'fitness center', 'fitness room'], 'Gym'],
+    [['elevator', 'lift'], 'Elevator'],
+    [['hair dryer', 'hairdryer'], 'Hair dryer'],
+    [['smoke alarm', 'smoke detector'], 'Smoke alarm'],
+    [['beach access', 'beachfront', 'beach front', 'beachaccess'], 'Beach access'],
+    [['hot water', 'hot water kettle'], 'Hot water'],
+    [['iron', 'clothing iron'], 'Iron'],
+    [['clothing storage', 'wardrobe', 'closet', 'dresser', 'walk-in closet'], 'Clothing storage'],
+    [['workspace', 'dedicated workspace', 'desk', 'work space'], 'Dedicated workspace'],
+    [['high chair', 'highchair'], 'High chair'],
+    [['crib', 'baby crib', 'travel crib', 'pack n play'], 'Crib'],
+    [['fire pit', 'firepit'], 'Fire pit'],
+    [['outdoor dining', 'outdoor dining area', 'patio or balcony', 'balcony', 'patio'], 'Patio / balcony'],
+    [['outdoor shower', 'outdoor shower area'], 'Outdoor shower'],
+    [['first aid kit', 'first aid'], 'First aid kit'],
+    [['fire extinguisher'], 'Fire extinguisher'],
+    [['carbon monoxide alarm', 'carbon monoxide detector', 'co alarm', 'co detector'], 'Carbon monoxide alarm'],
+    [['lockbox', 'lock box', 'smart lock', 'keypad', 'self check-in', 'self checkin'], 'Self check-in'],
+    [['shower', 'shower gel', 'body soap', 'bath'], 'Shower'],
+    [['shampoo', 'conditioner'], 'Shampoo'],
+    [['bed linens', 'linens', 'sheets'], 'Bed linens'],
+    [['towels', 'towel'], 'Towels'],
+    [['hangers', 'hanger'], 'Hangers'],
+    [['refrigerator', 'fridge'], 'Refrigerator'],
+    [['microwave'], 'Microwave'],
+    [['dishes', 'dishes and silverware', 'silverware', 'cutlery', 'cookware'], 'Dishes & silverware'],
+  ],
+
+  // Normalise a raw amenity label to a canonical {key, label}.
+  // Returns the canonical entry if any alias matches; otherwise returns the original.
+  _normalizeAmenity(raw) {
+    const s = raw.toLowerCase().trim();
+    for (const [aliases, canonical] of this._AMENITY_GROUPS) {
+      if (aliases.some(a => s === a || s.startsWith(a + ' ') || s.endsWith(' ' + a) || s.includes(' ' + a + ' '))) {
+        return { key: canonical.toLowerCase(), label: canonical };
+      }
+    }
+    return { key: s, label: raw.trim() };
   },
 
   // Scan all listings for their allAmenities arrays; add any new ones to _amenityMap.
@@ -229,10 +285,11 @@ window.FilterPanel = {
     for (const l of allListings) {
       const list = l.amenities?.allAmenities;
       if (!Array.isArray(list)) continue;
-      for (const label of list) {
-        const key = label.toLowerCase().trim();
+      for (const raw of list) {
+        if (!raw) continue;
+        const { key, label } = this._normalizeAmenity(raw);
         if (key && !this._amenityMap.has(key)) {
-          this._amenityMap.set(key, label.trim());
+          this._amenityMap.set(key, label);
         }
       }
     }
@@ -250,6 +307,19 @@ window.FilterPanel = {
     const menu = this.panel?.querySelector('#airbnb-fb-amenities-menu');
     if (!menu) return;
     menu.innerHTML = this._buildAmenityOptions();
+    // Search box — filter visible items as user types
+    const searchInput = menu.querySelector('.airbnb-fb-amenity-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        const q = searchInput.value.toLowerCase();
+        menu.querySelectorAll('.airbnb-fb-dd-item').forEach(item => {
+          item.style.display = item.textContent.toLowerCase().includes(q) ? '' : 'none';
+        });
+      });
+      // Prevent the dropdown's own click-outside handler from closing the menu
+      // when the user clicks into the search box.
+      searchInput.addEventListener('click', e => e.stopPropagation());
+    }
     // Re-attach change listeners on the new checkboxes only
     menu.querySelectorAll('[data-amenity]').forEach(cb => {
       cb.addEventListener('change', () => {
@@ -429,10 +499,13 @@ window.FilterPanel = {
         if (f.minGuests !== null && (a.maxGuests == null || a.maxGuests < f.minGuests)) pass = false;
 
         if (f.amenities.length > 0) {
-          // f.amenities contains lowercased labels; match against allAmenities string array
-          const available = (a.allAmenities || []).map(s => s.toLowerCase());
+          // f.amenities contains canonical normalized keys (e.g. "air conditioning").
+          // Normalize the listing's allAmenities the same way before comparing.
+          const available = new Set(
+            (a.allAmenities || []).map(s => this._normalizeAmenity(s).key)
+          );
           for (const key of f.amenities) {
-            if (!available.includes(key)) { pass = false; break; }
+            if (!available.has(key)) { pass = false; break; }
           }
         }
 

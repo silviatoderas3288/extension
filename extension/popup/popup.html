@@ -182,6 +182,61 @@
       text-align: center;
       line-height: 1.4;
     }
+
+    .settings {
+      border-top: 1px solid #f0f0f0;
+      padding: 8px 16px 12px;
+    }
+
+    .settings summary {
+      font-size: 11px;
+      color: #aaa;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      padding: 4px 0;
+    }
+
+    .settings summary::-webkit-details-marker { display: none; }
+    .settings summary::before { content: '⚙ '; }
+
+    .settings-body {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+      align-items: center;
+    }
+
+    .settings-input {
+      flex: 1;
+      font-size: 11px;
+      padding: 5px 8px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      color: #444;
+      outline: none;
+    }
+
+    .settings-input:focus { border-color: #FF395C; }
+
+    .settings-save {
+      font-size: 11px;
+      padding: 5px 10px;
+      background: #FF395C;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .settings-save:hover { background: #e0304f; }
+
+    .settings-status {
+      font-size: 10px;
+      color: #aaa;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -217,6 +272,16 @@
   </div>
 
   <div class="tip" id="tip">Navigate to an Airbnb wishlist to get started.</div>
+
+  <details class="settings" id="firebase-settings">
+    <summary>Firebase Config</summary>
+    <div class="settings-body">
+      <input class="settings-input" type="url" id="firebase-url-input"
+        placeholder="https://your-project-default-rtdb.firebaseio.com" />
+      <button class="settings-save" id="firebase-url-save">Save</button>
+    </div>
+    <div class="settings-status" id="firebase-url-status"></div>
+  </details>
 
   <script src="popup.js"></script>
 </body>

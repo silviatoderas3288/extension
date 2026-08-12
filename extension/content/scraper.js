@@ -1,7 +1,8 @@
 // scraper.js
 // Extracts listing data from Airbnb wishlist card DOM elements
 
-window.AirbnbScraper = {
+window.AirbnbCompare = window.AirbnbCompare || {};
+window.AirbnbCompare.AirbnbScraper = {
   /**
    * Find all listing cards in the wishlist grid.
    * Airbnb renders cards as anchor tags or divs with itemprop="itemListElement"
@@ -72,6 +73,21 @@ window.AirbnbScraper = {
       // Price — try to read directly from the card DOM (visible when dates are selected)
       const nightlyPrice = this.extractNightlyPrice(card);
       const priceText = nightlyPrice ? `$${nightlyPrice}` : '';
+      // "Unavailable" combines several heuristics (opacity/text/class + old date-based
+      // no-price check) since we have no live Airbnb DOM access to confirm exact markup.
+      const photoContainer = card.querySelector('[data-testid="card-container"]') || card;
+      const cardOpacity = parseFloat(window.getComputedStyle(card).opacity);
+      const photoOpacity = parseFloat(window.getComputedStyle(photoContainer).opacity);
+      const opacitySignal = (!isNaN(cardOpacity) && cardOpacity < 0.85) ||
+        (!isNaN(photoOpacity) && photoOpacity < 0.85);
+      const unavailableTextEl = this._findTextContaining(card, [
+        'not available', 'unavailable', 'no longer available', "isn't available",
+      ]);
+      const textSignal = !!unavailableTextEl;
+      const classSignal = /navailable/i.test(card.className) ||
+        !!card.querySelector('[class*="navailable" i]');
+      const dateSignal = this.getSelectedNights() > 0 && !(nightlyPrice > 0);
+      const unavailable = opacitySignal || textSignal || classSignal || dateSignal;
 
       // Rating
       const ratingEl =
@@ -86,17 +102,28 @@ window.AirbnbScraper = {
       const reviewMatch = ratingText.match(/(\d+)\s*review/i);
       const reviewCount = reviewMatch ? parseInt(reviewMatch[1]) : null;
 
-      // Cover photo — always use the 1st photo in the carousel, not whichever slide is active.
-      // Airbnb lazy-loads carousel imgs with data-src/data-deferred-src before setting src,
-      // so we check those attributes first, then fall back to src.
-      const photoContainer = card.querySelector('[data-testid="card-container"]') || card;
+      // Cover photo — always use the 1st real listing photo in the carousel.
+      // Skip badge/label images (Guest Favourite, Recommended, etc.) which are also
+      // served from muscache but are small icons with descriptive alt text.
+      // (photoContainer computed above for the opacity-based unavailable signal)
       const allImgs = Array.from(photoContainer.querySelectorAll('img'));
-      const firstCarouselImg = allImgs.find(i =>
-        (i.getAttribute('data-src') || i.getAttribute('data-deferred-src') || i.src || '').includes('muscache')
-      ) || allImgs[0];
+      const badgeAltPattern = /recommended|guest.fav|favourite|favorite|superhost|plus|badge|icon|logo/i;
+      const firstCarouselImg = allImgs.find(i => {
+        const src = i.getAttribute('data-src') || i.getAttribute('data-deferred-src') || i.src || '';
+        if (!src.includes('muscache')) return false;
+        // Skip small badge/label images by alt text
+        const alt = i.getAttribute('alt') || '';
+        if (badgeAltPattern.test(alt)) return false;
+        // Skip tiny images (badges are typically <= 48px)
+        if (i.width > 0 && i.width <= 48) return false;
+        if (i.height > 0 && i.height <= 48) return false;
+        return true;
+      }) || allImgs.find(i => (i.getAttribute('data-src') || i.getAttribute('data-deferred-src') || i.src || '').includes('muscache'))
+         || allImgs[0];
       const photo = firstCarouselImg
         ? (firstCarouselImg.getAttribute('data-src') ||
            firstCarouselImg.getAttribute('data-deferred-src') ||
+           firstCarouselImg.getAttribute('srcset')?.split(' ')[0] ||
            firstCarouselImg.src || '')
         : '';
 
@@ -129,6 +156,7 @@ window.AirbnbScraper = {
         savedDates: datesText,
         priceText,
         nightlyPrice,  // parsed from card DOM when dates are selected
+        unavailable, // opacity/text/class dimmed-card signal OR'd with the dates-selected-no-price signal
         rating,
         reviewCount,
         photo,

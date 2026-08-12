@@ -1,7 +1,8 @@
 // comparison-panel.js
-// Renders the "Quick Comparison" panel — matches Figma node 79-1361
+// Renders the "Compare" panel — matches Figma node 79-1361
 
-window.ComparisonPanel = {
+window.AirbnbCompare = window.AirbnbCompare || {};
+window.AirbnbCompare.ComparisonPanel = {
   panel: null,
   _allListings: [],
   _guestCount: 1,
@@ -27,7 +28,7 @@ window.ComparisonPanel = {
 
   show(selectedListings, allListings, onSwap, onDeselect) {
     this._allListings = allListings;
-    this._guestCount = (typeof AirbnbScraper !== 'undefined') ? AirbnbScraper.getSelectedGuestCount() : 1;
+    this._guestCount = window.AirbnbCompare?.AirbnbScraper?.getSelectedGuestCount() ?? 1;
     if (this.panel) this.panel.remove();
 
     const panel = document.createElement('div');
@@ -66,29 +67,37 @@ window.ComparisonPanel = {
   },
 
   _buildHTML(listings) {
-    const cols = listings.map((l, i) => this._buildColumn(l, i)).join('');
+    const cards = listings.map((l, i) => this._buildCard(l, i, listings.length)).join('');
+    // Always render the shared row-table — aligning the same attribute across
+    // columns on one row is easier to scan than N independent per-card grids,
+    // regardless of how many listings are selected.
     return `
       <div class="airbnb-cp-header">
-        <span class="airbnb-cp-title">Quick Comparison</span>
+        <span class="airbnb-cp-title">Compare</span>
         <button class="airbnb-cp-close" id="airbnb-cp-close-btn" aria-label="Close comparison">✕</button>
       </div>
-      <div class="airbnb-cp-columns">
-        ${cols}
+      <div class="airbnb-cp-cards" style="--airbnb-cp-cols: ${listings.length}">
+        ${cards}
+      </div>
+      <div class="airbnb-cp-table" style="--airbnb-cp-cols: ${listings.length}">
+        ${this._buildAmenityTable(listings)}
       </div>
     `;
   },
 
-  _buildColumn(listing, slotIndex) {
+  // Photo + selector + price/stats card — one per selected listing. Putting the
+  // actual cover photo here is the main fix for "which one is this again?":
+  // previously each column was just a text dropdown with no visual to tell
+  // listings apart at a glance.
+  _buildCard(listing, slotIndex, totalCount) {
     const amenities = listing.amenities || {};
     const guestCount = this._guestCount || 1;
 
-    // Nightly price: prefer card DOM price (visible when dates selected), then background fetch
     const nightlyPrice = (listing.nightlyPrice > 0 ? listing.nightlyPrice : null)
       || (amenities.nightlyPrice > 0 ? amenities.nightlyPrice : null)
-      || AirbnbScraper.parsePriceText(listing.priceText);
+      || window.AirbnbCompare.AirbnbScraper.parsePriceText(listing.priceText);
 
-    // Total stay = nightly × nights. Only show per-person total when dates are selected.
-    const selectedNights = AirbnbScraper.getSelectedNights();
+    const selectedNights = window.AirbnbCompare.AirbnbScraper.getSelectedNights();
     let priceDisplay = '—';
     if (nightlyPrice) {
       if (selectedNights && selectedNights > 0) {
@@ -98,7 +107,6 @@ window.ComparisonPanel = {
           ? `$${perPerson.toLocaleString()} / person`
           : `$${totalStay.toLocaleString()} total`;
       } else {
-        // No dates selected — show nightly price, flag that total needs dates
         priceDisplay = `$${nightlyPrice.toLocaleString()} / night`;
       }
     }
@@ -110,40 +118,39 @@ window.ComparisonPanel = {
       })
       .join('');
 
+    const photoAlt = (listing.title || 'Listing photo').replace(/"/g, '&quot;');
+
     return `
       <div class="airbnb-cp-col" data-slot="${slotIndex}">
-        <!-- Dropdown -->
+        <div class="airbnb-cp-photo-wrap">
+          ${listing.photo
+            ? `<img class="airbnb-cp-photo" src="${listing.photo}" alt="${photoAlt}" loading="lazy">`
+            : `<div class="airbnb-cp-photo airbnb-cp-photo--placeholder"></div>`}
+        </div>
+
         <div class="airbnb-cp-dropdown-wrap">
           <select class="airbnb-cp-dropdown" data-slot="${slotIndex}" aria-label="Select listing for slot ${slotIndex + 1}">
             ${dropdownOptions}
           </select>
           <span class="airbnb-cp-dropdown-arrow">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M4 6L8 10L12 6" stroke="#FF395C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6L8 10L12 6" stroke="#FF395C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </span>
         </div>
 
-        <!-- Price per person -->
         <div class="airbnb-cp-price-pp">${priceDisplay}</div>
 
-        <!-- Beds / baths / guests -->
         <div class="airbnb-cp-stats">
           ${amenities.beds != null ? `<span>${amenities.beds} bed${amenities.beds !== 1 ? 's' : ''}</span>` : ''}
           ${amenities.baths != null ? `<span>${amenities.baths} bath${amenities.baths !== 1 ? 's' : ''}</span>` : ''}
           ${amenities.maxGuests != null ? `<span>${amenities.maxGuests} guests max</span>` : ''}
         </div>
-
-        <!-- Amenity icon grid card -->
-        <div class="airbnb-cp-icon-card">
-          <div class="airbnb-cp-icon-grid">
-            ${this._buildIconGrid(amenities)}
-          </div>
-        </div>
       </div>
     `;
   },
 
+  // Per-card 5-col amenity icon grid — no longer used by this panel's own
+  // cards (the shared row-table replaced it here), but kept for the embedded
+  // Quick Compare section in priorities-panel.js, which reuses it directly.
   _buildIconGrid(amenities) {
     return this.AMENITIES.map(({ key, label, svg }) => {
       const value = amenities[key];
@@ -166,6 +173,69 @@ window.ComparisonPanel = {
         </div>
       `;
     }).join('');
+  },
+
+  // Row-per-amenity table shared across all selected listings, instead of a
+  // separate 5-column icon grid repeated under each card. Aligning the same
+  // attribute across columns on one row is what actually makes differences
+  // easy to spot — scanning three independent icon grids side by side made
+  // you hunt for the same icon in three different grid positions.
+  _buildAmenityTable(listings) {
+    const amenitiesList = listings.map((l) => l.amenities || {});
+    const rows = this.AMENITIES.map(({ key, label, svg }) => {
+      const cellStates = amenitiesList.map((amenities) => {
+        const hasData = Object.keys(amenities).length > 3;
+        if (!hasData) return 'unknown';
+        const available = key === 'cancellation'
+          ? (amenities[key] && amenities[key] !== 'unknown')
+          : amenities[key] === true;
+        return available ? 'available' : 'unavailable';
+      });
+
+      // Flag rows where listings disagree (some have it, some don't) — these
+      // are exactly the rows worth a second look when picking between options.
+      const knownStates = cellStates.filter((s) => s !== 'unknown');
+      const isDifferentiator = new Set(knownStates).size > 1;
+
+      const cells = cellStates.map((state) => `
+        <div class="airbnb-cp-table-cell airbnb-cp-table-cell--${state}">
+          ${state === 'available' ? this._svgCheck() : state === 'unavailable' ? this._svgCross() : '—'}
+        </div>`).join('');
+
+      return `
+        <div class="airbnb-cp-table-row${isDifferentiator ? ' airbnb-cp-table-row--diff' : ''}">
+          <div class="airbnb-cp-table-label">
+            <span class="airbnb-cp-table-label-icon">${svg}</span>
+            <span>${label}</span>
+          </div>
+          ${cells}
+        </div>`;
+    }).join('');
+
+    // Wrapped in its own inner div so the scroll viewport (.airbnb-cp-table)
+    // and the content whose natural width drives the scrollbar are separate
+    // elements — relying on each row's own width to agree was fragile.
+    return `
+      <div class="airbnb-cp-table-inner">
+        <div class="airbnb-cp-table-row airbnb-cp-table-row--head">
+          <div class="airbnb-cp-table-label"></div>
+          ${listings.map((l) => {
+            const fullTitle = l.title || l.locationTitle || 'Listing';
+            const safeTitle = fullTitle.replace(/"/g, '&quot;');
+            return `<div class="airbnb-cp-table-cell airbnb-cp-table-cell--head" title="${safeTitle}">${fullTitle}</div>`;
+          }).join('')}
+        </div>
+        ${rows}
+      </div>
+    `;
+  },
+
+  _svgCheck() {
+    return '<svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5L8 14.5L16 6" stroke="#1DA84B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  },
+
+  _svgCross() {
+    return '<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M5 5L15 15M15 5L5 15" stroke="#C6C6C6" stroke-width="2.5" stroke-linecap="round"/></svg>';
   },
 
   _attachListeners(listings, onSwap, onDeselect) {

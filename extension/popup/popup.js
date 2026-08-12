@@ -87,4 +87,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     compareBtn.disabled = true;
     tipEl.textContent = msg;
   }
+
+  // ── Firebase URL config ─────────────────────────────────────────────────────
+  const urlInput  = document.getElementById('firebase-url-input');
+  const urlSave   = document.getElementById('firebase-url-save');
+  const urlStatus = document.getElementById('firebase-url-status');
+
+  chrome.storage.local.get('firebaseDbUrl', result => {
+    if (result.firebaseDbUrl) urlInput.value = result.firebaseDbUrl;
+  });
+
+  urlSave.addEventListener('click', () => {
+    const url = urlInput.value.trim();
+    chrome.storage.local.set({ firebaseDbUrl: url }, () => {
+      urlStatus.textContent = url ? 'Saved.' : 'Cleared.';
+      setTimeout(() => { urlStatus.textContent = ''; }, 2000);
+    });
+  });
 });

@@ -1,7 +1,8 @@
 // compare-button.js
-// Injects the "Quick Compare" pill button just below the dates/header row
+// Injects the "Compare" pill button just below the dates/header row
 
-window.CompareButton = {
+window.AirbnbCompare = window.AirbnbCompare || {};
+window.AirbnbCompare.CompareButton = {
   button: null,
   _wrapper: null,
 
@@ -26,7 +27,7 @@ window.CompareButton = {
 
     const btn = document.createElement('button');
     btn.id = 'airbnb-compare-btn';
-    btn.textContent = 'Quick Compare';
+    btn.textContent = 'Compare';
     btn.className = 'airbnb-compare-btn';
     btn.setAttribute('aria-pressed', 'false');
 
@@ -42,7 +43,7 @@ window.CompareButton = {
 
     const headerRow = this._findHeaderRow();
     if (headerRow) {
-      // Insert right after the header row so Quick Compare sits below the dates button
+      // Insert right after the header row so Compare sits below the dates button
       headerRow.insertAdjacentElement('afterend', wrapper);
     } else {
       document.body.prepend(wrapper);

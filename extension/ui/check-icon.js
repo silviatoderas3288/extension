@@ -2,7 +2,8 @@
 // Injects circular check badge on each listing card (bottom-right of photo)
 // Three states: unfilled (default), filled (selected), none (disabled)
 
-window.CheckIcon = {
+window.AirbnbCompare = window.AirbnbCompare || {};
+window.AirbnbCompare.CheckIcon = {
   /**
    * Inject check icons onto all currently scraped listing cards.
    * @param {Array} listings - array from AirbnbScraper.scrapeAll()
@@ -21,17 +22,41 @@ window.CheckIcon = {
     const card = listing._cardEl;
     if (!card || card.querySelector('.airbnb-check-icon')) return;
 
-    // Find the photo container (first img or figure)
-    const photoContainer =
-      card.querySelector('picture, figure, [class*="Photo"], [class*="image"]') ||
-      card.querySelector('img')?.parentElement;
+    // Card photos are carousels: several <img> slides share the DOM, but only
+    // one is actually laid out — the rest are display:none, zero-size, or
+    // shifted off-screen via transform for the swipe animation. Cards can
+    // also contain small, unrelated visible images (host avatar, Superhost /
+    // Guest-favorite badge icons) that appear earlier in DOM order than the
+    // cover photo — a plain "first visible image" heuristic would anchor the
+    // check icon to one of those instead. Filter out anything below a size
+    // floor (badges/avatars are reliably small, cover photos are not), then
+    // pick the largest by rendered area so the actual cover photo wins.
+    const candidates = Array.from(card.querySelectorAll('img')).filter((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.width >= 80 && rect.height > 0 && candidate.offsetParent !== null;
+    });
+    const img = candidates.reduce((largest, candidate) => {
+      if (!largest) return candidate;
+      const largestRect = largest.getBoundingClientRect();
+      const candidateRect = candidate.getBoundingClientRect();
+      const largestArea = largestRect.width * largestRect.height;
+      const candidateArea = candidateRect.width * candidateRect.height;
+      return candidateArea > largestArea ? candidate : largest;
+    }, null);
+    if (!img) return;
 
-    if (!photoContainer) return;
-
-    // Make sure the photo container is positioned
-    const computed = window.getComputedStyle(photoContainer);
+    // Anchor directly inside the image's own immediate parent and let CSS
+    // (bottom/right, see content.css) pin the icon to its corner. JS pixel
+    // math recomputed only on specific events (resize, image resize,
+    // one rAF after injection) used to drift out of sync during scroll —
+    // lazy-loaded image swaps and layout shifts between events left the
+    // icon visibly detached from the photo. Anchoring in CSS against the
+    // image's own box means the browser keeps it pinned through scroll/
+    // reflow with no recomputation, so no drift is possible.
+    const anchor = img.parentElement;
+    const computed = window.getComputedStyle(anchor);
     if (computed.position === 'static') {
-      photoContainer.style.position = 'relative';
+      anchor.style.position = 'relative';
     }
 
     const checkEl = document.createElement('button');
@@ -49,7 +74,7 @@ window.CheckIcon = {
       onToggle(listing, !isFilled);
     });
 
-    photoContainer.appendChild(checkEl);
+    anchor.appendChild(checkEl);
     listing._checkEl = checkEl;
   },
 

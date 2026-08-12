@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "mcp__figma__get_screenshot",
       "mcp__figma__get_metadata",
