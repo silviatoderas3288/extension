@@ -112,6 +112,9 @@ window.AirbnbCompare.ComparisonPanel = {
     }
 
     const dropdownOptions = this._allListings
+      // Hide unavailable listings from the swap dropdown, but keep this
+      // slot's current listing visible/selected even if it's unavailable.
+      .filter((l) => !l.unavailable || l.id === listing.id)
       .map((l) => {
         const label = l.title || l.locationTitle;
         return `<option value="${l.id}" ${l.id === listing.id ? 'selected' : ''}>${label}</option>`;

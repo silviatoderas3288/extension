@@ -472,7 +472,8 @@ window.AirbnbCompare.PrioritiesPanel = {
   _rankListingsForGroup(participants) {
     const active = participants.filter(([, p]) => p.priorities?.length > 0);
     if (active.length === 0) return [];
-    const candidates = this._allListings.filter(l => l.amenities && Object.keys(l.amenities).length > 0);
+    // Unavailable listings must never be auto-ranked into Winner/Runner-up/Quick Compare slots.
+    const candidates = this._allListings.filter(l => !l.unavailable && l.amenities && Object.keys(l.amenities).length > 0);
     if (candidates.length === 0) return [];
     return candidates.map(l => {
       const a = l.amenities || {};
